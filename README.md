@@ -1,2 +1,3 @@
 # rt-navi
-GNSS Real time positioning
+
+Real time positioning.
