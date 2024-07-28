@@ -2,6 +2,7 @@
 
 // private
 mod cli;
+mod ublox;
 
 use env_logger::{Builder, Target};
 
@@ -21,7 +22,7 @@ pub fn main() -> Result<(), Error> {
         .format_timestamp_secs()
         .format_module_path(false)
         .init();
-    
+
     // cli and user args
     let cli = Cli::new();
 

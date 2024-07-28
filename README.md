@@ -26,3 +26,14 @@ Cross-compilation
 =================
 
 `rt-navi` is compatible with cross-compilation, but it currently requires support of the `std` library.
+
+Ecosystem
+=========
+
+`rt-navi` uses the combination of several major crates to achieve its objectives
+
+- [ANISE](https://github.com/nyx-space/anise)
+- [Hifitime](https://github.com/nyx-space/hifitime)
+- [Nyx-Space](https://github.com/nyx-space/nyx)
+- [SP3](https://github.com/georust/rinex/sp3)
+- [UBlox](https://github.com/ublox-rs/ublox)

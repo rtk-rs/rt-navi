@@ -21,6 +21,9 @@ log = "0.4"
 env_logger = "0.11"
 thiserror = "1"
 
+ublox = "0.4.5"
+serialport = "4.2.2"
+
 clap = { version = "4.4.13", features = ["derive", "color"] }
 
 anise = { version = "0.4.2", features = ["embed_ephem"] }
@@ -31,7 +34,6 @@ gnss-rs = { version = "2.2.0", features = ["serde"] }
 # gnss-rtk = { version = "0.4.5", features = ["serde"] }
 # gnss-rtk = { path = "../../rtk-rs/gnss-rtk", features = ["serde"] }
 gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "main", features = ["serde"] }
-
 
 gpx = { version = "0.10", optional = true }
 kml = { version = "0.8", optional = true }

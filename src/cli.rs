@@ -28,13 +28,14 @@ impl Cli {
                     .arg_required_else_help(true)
                     .color(ColorChoice::Always)
                     .next_help_heading("GNSS Receiver (Hardware)")
-                    .arg(Arg::new("ublox")
-                        .short('u')
-                        .long("ublox")
-                        .value_name("PORT")
-                        .help("Specify serial port to Ublox device")
+                    .arg(
+                        Arg::new("ublox")
+                            .short('u')
+                            .long("ublox")
+                            .value_name("PORT")
+                            .help("Specify serial port to Ublox device"),
                     )
-                .get_matches()
+                    .get_matches()
             },
         }
     }
