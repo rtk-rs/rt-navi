@@ -1,12 +1,21 @@
-use serialport::SerialPort;
+use std::time::Duration;
 use thiserror::Error;
-
 use ublox::{PacketRef as UbxPacketRef, Parser as UbxParser, UbxPacketMeta};
 
 use std::io::{ErrorKind as IoErrorKind, Result as IoResult};
 
+use serialport::{
+    DataBits as SerialDataBits, FlowControl as SerialFlowControl, Parity as SerialParity,
+    SerialPort, StopBits as SerialStopBits,
+};
+
 #[derive(Debug, Error)]
 pub enum Error {}
+
+pub struct SerialOpts {
+    pub port: String,
+    pub baud: u32,
+}
 
 pub struct Ublox {
     port: Box<dyn SerialPort>,
@@ -15,7 +24,18 @@ pub struct Ublox {
 
 impl Ublox {
     /// Builds new Ublox device
-    pub fn new(port: Box<dyn SerialPort>) -> Self {
+    pub fn new(opts: SerialOpts) -> Self {
+        let port = opts.port.clone();
+        let port = serialport::new(opts.port, opts.baud)
+            .stop_bits(SerialStopBits::One)
+            .data_bits(SerialDataBits::Eight)
+            .timeout(Duration::from_millis(10))
+            .parity(SerialParity::Even)
+            .flow_control(SerialFlowControl::None)
+            .open()
+            .unwrap_or_else(|e| {
+                panic!("failed to open port {}: {}", port, e);
+            });
         Self {
             port,
             parser: Default::default(),

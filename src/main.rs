@@ -11,6 +11,7 @@ extern crate log;
 
 use cli::Cli;
 use thiserror::Error;
+use ublox::Ublox;
 
 #[derive(Debug, Error)]
 pub enum Error {}
@@ -25,6 +26,8 @@ pub fn main() -> Result<(), Error> {
 
     // cli and user args
     let cli = Cli::new();
+    let opts = cli.serial_opts();
+    let mut ublox = Ublox::new(opts);
 
     Ok(())
 }

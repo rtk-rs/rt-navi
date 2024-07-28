@@ -3,6 +3,7 @@ use std::{
     str::FromStr,
 };
 
+use crate::ublox::SerialOpts;
 use clap::{value_parser, Arg, ArgAction, ArgMatches, ColorChoice, Command};
 
 pub struct Cli {
@@ -32,11 +33,18 @@ impl Cli {
                         Arg::new("ublox")
                             .short('u')
                             .long("ublox")
+                            .required(true)
                             .value_name("PORT")
                             .help("Specify serial port to Ublox device"),
                     )
                     .get_matches()
             },
+        }
+    }
+    pub fn serial_opts(&self) -> SerialOpts {
+        SerialOpts {
+            port: self.matches.get_one::<String>("ublox").unwrap().to_string(),
+            baud: 9600,
         }
     }
 }
