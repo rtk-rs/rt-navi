@@ -6,6 +6,8 @@ mod ublox;
 
 use env_logger::{Builder, Target};
 
+use gnss_rtk::prelude::{Config, Method, Solver};
+
 #[macro_use]
 extern crate log;
 
@@ -28,6 +30,11 @@ pub fn main() -> Result<(), Error> {
     let cli = Cli::new();
     let opts = cli.serial_opts();
     let mut ublox = Ublox::new(opts);
+
+    let method = Method::SPP;
+    let cfg = Config::static_preset(method);
+
+    let solver = Solver::new(&cfg, None, |t, sv, _| None);
 
     Ok(())
 }
