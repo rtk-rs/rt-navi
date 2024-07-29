@@ -19,9 +19,15 @@ use ublox::{Command, Message, Ublox};
 use tokio::sync::mpsc;
 
 #[derive(Debug, Error)]
-pub enum Error {}
+pub enum Error {
+    #[error("non supported constellation {0}")]
+    NonSupportedGnss(u8),
+    #[error("non supported signal {0}")]
+    NonSupportedSignal(u8),
+}
 
-fn main() -> Result<(), Error> {
+#[tokio::main]
+async fn main() -> Result<(), Error> {
     let mut builder = Builder::from_default_env();
     builder
         .target(Target::Stdout)
@@ -50,7 +56,7 @@ fn main() -> Result<(), Error> {
     });
 
     loop {
-        while let Some(msg) = rx.blocking_recv() {
+        while let Some(msg) = rx.recv().await {
             match msg {
                 Message::Candidates(candidates) => {},
             }
