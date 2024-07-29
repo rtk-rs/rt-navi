@@ -1,6 +1,10 @@
 use std::time::Duration;
 use thiserror::Error;
-use ublox::{PacketRef as UbxPacketRef, Parser as UbxParser, UbxPacketMeta};
+
+use ublox::{
+    CfgMsgAllPorts, CfgMsgAllPortsBuilder, NavPvt, PacketRef as UbxPacketRef, Parser as UbxParser,
+    UbxPacketMeta,
+};
 
 use std::io::{ErrorKind as IoErrorKind, Result as IoResult};
 
@@ -8,6 +12,8 @@ use serialport::{
     DataBits as SerialDataBits, FlowControl as SerialFlowControl, Parity as SerialParity,
     SerialPort, StopBits as SerialStopBits,
 };
+
+use gnss_rtk::prelude::Candidate;
 
 #[derive(Debug, Error)]
 pub enum Error {}
@@ -20,6 +26,11 @@ pub struct SerialOpts {
 pub struct Ublox {
     port: Box<dyn SerialPort>,
     parser: UbxParser<Vec<u8>>,
+}
+
+#[derive(Debug, Clone)]
+pub enum Message {
+    Candidates(Vec<Candidate>),
 }
 
 impl Ublox {
@@ -41,11 +52,28 @@ impl Ublox {
             parser: Default::default(),
         }
     }
+
+    /// Initialize hardware device
+    pub fn init(&mut self) {
+        self.write_acked(
+            CfgMsgAllPorts,
+            &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
+        )
+        .unwrap_or_else(|e| panic!("failed to activate NavPvt msg: {}", e));
+    }
+
     /// Writes all bytes to device
     pub fn write_all(&mut self, data: &[u8]) -> IoResult<()> {
         self.port.write_all(data)
     }
 
+    /// Writes message and waits for ack
+    pub fn write_acked<M: UbxPacketMeta>(&mut self, msg: M, data: &[u8]) -> IoResult<()> {
+        self.port.write_all(data)?;
+        self.wait_for_ack::<M>()
+    }
+
+    /// Wait for ACK from device
     pub fn wait_for_ack<T: UbxPacketMeta>(&mut self) -> std::io::Result<()> {
         let mut found_packet = false;
         while !found_packet {

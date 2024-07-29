@@ -29,7 +29,9 @@ pub fn main() -> Result<(), Error> {
     // cli and user args
     let cli = Cli::new();
     let opts = cli.serial_opts();
+
     let mut ublox = Ublox::new(opts);
+    ublox.init();
 
     let method = Method::SPP;
     let cfg = Config::static_preset(method);
