@@ -1,9 +1,11 @@
 use std::time::Duration;
 use thiserror::Error;
 
+use chrono::prelude::*;
+
 use ublox::{
-    CfgMsgAllPorts, CfgMsgAllPortsBuilder, NavPvt, PacketRef as UbxPacketRef, Parser as UbxParser,
-    UbxPacketMeta,
+    CfgMsgAllPorts, CfgMsgAllPortsBuilder, GpsFix, NavPvt, PacketRef as UbxPacketRef,
+    Parser as UbxParser, Position as UbxPosition, UbxPacketMeta, Velocity as UbxVelocity,
 };
 
 use std::io::{ErrorKind as IoErrorKind, Result as IoResult};
@@ -13,19 +15,16 @@ use serialport::{
     SerialPort, StopBits as SerialStopBits,
 };
 
+use tokio::sync::mpsc::{Receiver, Sender};
+
 use gnss_rtk::prelude::Candidate;
 
 #[derive(Debug, Error)]
 pub enum Error {}
 
-pub struct SerialOpts {
-    pub port: String,
-    pub baud: u32,
-}
-
-pub struct Ublox {
-    port: Box<dyn SerialPort>,
-    parser: UbxParser<Vec<u8>>,
+#[derive(Debug, Clone)]
+pub enum Command {
+    AbortCandidates,
 }
 
 #[derive(Debug, Clone)]
@@ -33,9 +32,21 @@ pub enum Message {
     Candidates(Vec<Candidate>),
 }
 
+pub struct SerialOpts {
+    pub port: String,
+    pub baud: u32,
+}
+
+pub struct Ublox {
+    rx: Receiver<Command>,
+    tx: Sender<Message>,
+    port: Box<dyn SerialPort>,
+    parser: UbxParser<Vec<u8>>,
+}
+
 impl Ublox {
     /// Builds new Ublox device
-    pub fn new(opts: SerialOpts) -> Self {
+    pub fn new(opts: SerialOpts, rx: Receiver<Command>, tx: Sender<Message>) -> Self {
         let port = opts.port.clone();
         let port = serialport::new(opts.port, opts.baud)
             .stop_bits(SerialStopBits::One)
@@ -48,6 +59,8 @@ impl Ublox {
                 panic!("failed to open port {}: {}", port, e);
             });
         Self {
+            rx,
+            tx,
             port,
             parser: Default::default(),
         }
@@ -130,5 +143,56 @@ impl Ublox {
             }
         }
         Ok(())
+    }
+
+    /// Main tasklet
+    pub fn tasklet(&mut self) {
+        loop {
+            match self.update(|packet| match packet {
+                UbxPacketRef::MonVer(packet) => {
+                    println!(
+                        "SW version: {} HW version: {}; Extensions: {:?}",
+                        packet.software_version(),
+                        packet.hardware_version(),
+                        packet.extension().collect::<Vec<&str>>()
+                    );
+                    println!("{:?}", packet);
+                },
+                UbxPacketRef::NavPvt(sol) => {
+                    let has_time = sol.fix_type() == GpsFix::Fix3D
+                        || sol.fix_type() == GpsFix::GPSPlusDeadReckoning
+                        || sol.fix_type() == GpsFix::TimeOnlyFix;
+                    let has_posvel = sol.fix_type() == GpsFix::Fix3D
+                        || sol.fix_type() == GpsFix::GPSPlusDeadReckoning;
+
+                    if has_posvel {
+                        let pos: UbxPosition = (&sol).into();
+                        let vel: UbxVelocity = (&sol).into();
+                        println!(
+                            "Latitude: {:.5} Longitude: {:.5} Altitude: {:.2}m",
+                            pos.lat, pos.lon, pos.alt
+                        );
+                        println!(
+                            "Speed: {:.2} m/s Heading: {:.2} degrees",
+                            vel.speed, vel.heading
+                        );
+                        println!("Sol: {:?}", sol);
+                    }
+
+                    if has_time {
+                        let time: DateTime<Utc> = (&sol)
+                            .try_into()
+                            .expect("Could not parse NAV-PVT time field to UTC");
+                        println!("Time: {:?}", time);
+                    }
+                },
+                _ => {
+                    println!("{:?}", packet);
+                },
+            }) {
+                Ok(_) => {},
+                Err(e) => {},
+            }
+        }
     }
 }

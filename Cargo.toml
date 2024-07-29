@@ -20,6 +20,8 @@ readme = "README.md"
 log = "0.4"
 env_logger = "0.11"
 thiserror = "1"
+chrono = "0.4.29"
+tokio = "1.39.2"
 
 ublox = "0.4.5"
 serialport = "4.2.2"
