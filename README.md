@@ -1,6 +1,11 @@
 RT-NAVI
 =======
 
+[![rust](https://github.com/rtk-rs/rt-navi/actions/workflows/rust.yml/badge.svg)](https://github.com/rtk-rs/rt-navi/actions/workflows/rust.yml)
+[![crates.io](https://img.shields.io/crates/v/rt-navi.svg)](https://crates.io/crates/rt-navi)
+[![License](https://img.shields.io/badge/license-MPL-blue?style=flat-square)](https://github.com/rtk-rs/rt-navi/blob/main/LICENSE-MIT)
+[![crates.io](https://img.shields.io/crates/d/rt-navi.svg)](https://crates.io/crates/rt-navi)
+
 `RT-NAVI` stands for Real Time Navigation and aims at real time high precision navigation.
 
 Real time / Post processing
