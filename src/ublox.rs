@@ -18,7 +18,7 @@ use serialport::{
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use gnss_rtk::prelude::{
-    Candidate, Carrier, Constellation, Duration, Epoch, PhaseRange, PseudoRange, SV,
+    Candidate, Carrier, Constellation, Duration, Epoch, PhaseRange, PseudoRange, TimeScale, SV,
 };
 
 #[derive(Debug, Clone)]
@@ -28,7 +28,7 @@ pub enum Command {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Candidates(Vec<Candidate>),
+    Candidates((Epoch, Vec<Candidate>)),
 }
 
 pub struct SerialOpts {
@@ -38,13 +38,13 @@ pub struct SerialOpts {
 
 #[derive(Debug, Clone, Copy, Default)]
 struct Tow {
-    tow: u32,
-    week: u32,
+    pub tow: u32,
+    pub week: u32,
 }
 
 impl Tow {
-    fn epoch(&self) -> Epoch {
-        Default::default()
+    fn epoch(&self, ts: TimeScale) -> Epoch {
+        Epoch::from_time_of_week(self.week, self.tow as u64 * 1_000_000, ts)
     }
 }
 
@@ -191,6 +191,14 @@ impl Ublox {
         let mut gnss = Constellation::default();
         let mut candidates = Vec::<Candidate>::with_capacity(16);
         loop {
+            while let Ok(cmd) = self.rx.try_recv() {
+                match cmd {
+                    Command::AbortCandidates => {
+                        info!("cancelled {} candidates", candidates.len());
+                        candidates.clear();
+                    },
+                }
+            }
             match self.update(|packet| match packet {
                 UbxPacketRef::MonVer(packet) => {
                     info!(
@@ -226,7 +234,7 @@ impl Ublox {
 
                         candidates.push(Candidate::new(
                             sv,
-                            tow.epoch(),
+                            tow.epoch(TimeScale::GPST), //TODO
                             Duration::default(),
                             None,
                             vec![PseudoRange {
