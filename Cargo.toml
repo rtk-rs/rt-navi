@@ -34,7 +34,7 @@ hifitime = { version = "4.0.0-alpha", features = ["serde", "std"] }
 
 gnss-rs = { version = "2.2.1", features = ["serde"] }
 
-gnss-rtk = { version = "0.5.0", features = ["serde"] }
+gnss-rtk = { version = "0.6.0", features = ["serde"] }
 # gnss-rtk = { path = "../../rtk-rs/gnss-rtk", features = ["serde"] }
 # gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "main", features = ["serde"] }
 
