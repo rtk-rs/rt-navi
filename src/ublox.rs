@@ -4,8 +4,8 @@ use std::time::Duration as StdDuration;
 
 use ublox::{
     cfg_val::CfgVal, AlignmentToReferenceTime, CfgLayerSet, CfgMsgAllPorts, CfgMsgAllPortsBuilder,
-    CfgRate, CfgRateBuilder, CfgValSetBuilder, GnssFixType, NavEoe, NavPvt,
-    PacketRef as UbxPacketRef, Parser as UbxParser, Position as UbxPosition, RxmRawx,
+    CfgRate, CfgRateBuilder, CfgValSetBuilder, GnssFixType, MgaGpsEph, MgaGpsEphRef, NavEoe,
+    NavPvt, PacketRef as UbxPacketRef, Parser as UbxParser, Position as UbxPosition, RxmRawx,
     UbxPacketMeta, Velocity as UbxVelocity,
 };
 
@@ -20,8 +20,16 @@ use tokio::sync::mpsc::Sender;
 
 use gnss_rtk::prelude::{Candidate, Carrier, Constellation, Epoch, Observation, TimeScale, SV};
 
-#[derive(Debug, Clone)]
+use crate::{clock::SvClock, kepler::SvKepler};
+
 pub enum Message {
+    /// SV clock update
+    SvClock(SvClock),
+
+    /// SV Kepler update
+    SvKepler(SvKepler),
+
+    /// Proposal
     Proposal(Vec<Candidate>),
 }
 
@@ -101,23 +109,26 @@ impl Ublox {
             cfg_data: &cfg_data,
         };
 
-        self.write_acked(
-            CfgMsgAllPorts,
+        self.write_acked::<CfgMsgAllPorts>(
             &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
         )
         .unwrap_or_else(|e| panic!("Failed to activate NavPvt msg: {}", e));
 
-        self.write_acked(
-            CfgMsgAllPorts,
+        self.write_acked::<CfgMsgAllPorts>(
             &CfgMsgAllPortsBuilder::set_rate_for::<NavEoe>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
         )
         .unwrap_or_else(|e| panic!("Failed to activate NavEoe msg: {}", e));
 
-        self.write_acked(
-            CfgMsgAllPorts,
+        self.write_acked::<CfgMsgAllPorts>(
             &CfgMsgAllPortsBuilder::set_rate_for::<RxmRawx>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
         )
         .unwrap_or_else(|e| panic!("Failed to activate RxmRawx msg: {}", e));
+
+        self.write_acked::<CfgMsgAllPorts>(
+            &CfgMsgAllPortsBuilder::set_rate_for::<MgaGpsEph>([0, 1, 1, 1, 0, 0])
+                .into_packet_bytes(),
+        )
+        .unwrap_or_else(|e| panic!("Failed to activate MgaGpsEph msg: {}", e));
 
         let measure_rate_ms = (sampling_period_nanos / 1_000_000) as u16;
         let time_ref = AlignmentToReferenceTime::Gps;
@@ -143,7 +154,7 @@ impl Ublox {
     }
 
     /// Writes message and waits for ack
-    pub fn write_acked<M: UbxPacketMeta>(&mut self, msg: M, data: &[u8]) -> IoResult<()> {
+    pub fn write_acked<M: UbxPacketMeta>(&mut self, data: &[u8]) -> IoResult<()> {
         self.port.write_all(data)?;
         self.wait_for_ack::<M>()
     }
@@ -212,6 +223,8 @@ impl Ublox {
     /// Main tasklet
     pub async fn tasklet(&mut self) {
         let mut candidates = Vec::<Candidate>::with_capacity(8);
+        let mut sv_kepler = Vec::<SvKepler>::with_capacity(8);
+        let mut sv_clock = Vec::<SvClock>::with_capacity(8);
 
         loop {
             match self.update(|packet| match packet {
@@ -223,13 +236,13 @@ impl Ublox {
                         packet.extension().collect::<Vec<&str>>()
                     );
                 },
+
                 UbxPacketRef::RxmRawx(rawx) => {
                     let week = rawx.week() as u32;
                     let nanos = rawx.rcv_tow().round() as u64 * 1_000_000_000;
                     let t_gpst = Epoch::from_time_of_week(week, nanos, TimeScale::GPST);
 
                     debug!("{} new measurements", t_gpst);
-
                     candidates.clear();
 
                     for meas in rawx.measurements() {
@@ -263,6 +276,7 @@ impl Ublox {
                         }
                     }
                 },
+
                 UbxPacketRef::NavPvt(sol) => {
                     let has_time = sol.fix_type() == GnssFixType::Fix3D
                         || sol.fix_type() == GnssFixType::GPSPlusDeadReckoning
@@ -291,19 +305,31 @@ impl Ublox {
                         debug!("ublox absolute time: {}", time);
                     }
                 },
-                // Others
+
+                UbxPacketRef::MgaGpsEph(eph) => {
+                    let health = eph.sv_health(); // TODO
+                    let sv = SV::new(Constellation::GPS, eph.sv_id());
+
+                    sv_clock.push(SvClock::new(sv, eph.af0()));
+                    sv_kepler.push(SvKepler::new(sv, eph));
+                },
+
                 UbxPacketRef::InfTest(msg) => {
                     trace!("{:?}", msg);
                 },
+
                 UbxPacketRef::InfWarning(msg) => {
                     warn!("{:?}", msg);
                 },
+
                 UbxPacketRef::InfDebug(msg) => {
                     debug!("{:?}", msg);
                 },
+
                 UbxPacketRef::InfNotice(msg) => {
                     info!("{:?}", msg);
                 },
+
                 _ => {
                     trace!("unhandled message {:?}", packet);
                 },
@@ -323,6 +349,28 @@ impl Ublox {
                 }
 
                 candidates.clear();
+            }
+
+            for msg in sv_clock.iter() {
+                match self.tx.send(Message::SvClock(*msg)).await {
+                    Ok(_) => {},
+                    Err(e) => error!("Failed to update {} clock state: {}", msg.sv, e),
+                }
+            }
+
+            for msg in sv_kepler.iter() {
+                match self.tx.send(Message::SvKepler(*msg)).await {
+                    Ok(_) => {},
+                    Err(e) => error!("Failed to update {} keplerian state: {}", msg.sv, e),
+                }
+            }
+
+            if sv_clock.len() > 0 {
+                sv_clock.clear();
+            }
+
+            if sv_kepler.len() > 0 {
+                sv_kepler.clear();
             }
         }
     }
