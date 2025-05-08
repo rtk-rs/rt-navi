@@ -1,4 +1,17 @@
-//! Real-time navigation
+/*
+ * rt-navi is part of the rtk-rs framework.
+ *
+ * Authors: Guillaume W. Bres <guillaume.bressaix@gmail.com> et al.
+ * (cf. https://github.com/rtk-rs/rt-navi/graphs/contributors)
+ * This framework is shipped under Mozilla Public V2 license.
+ *
+ * Documentation:
+ *
+ *   https://github.com/rtk-rs/
+ *   https://github.com/rtk-rs/gnss-rtk
+ *   https://github.com/ublox-rx/ublox
+ */
+
 mod cli;
 mod rtcm;
 mod ublox;
@@ -80,6 +93,8 @@ async fn main() -> Result<(), Error> {
         panic!("Failed to obtain Frame definition: {}", e);
     });
 
+    let sampling_period_nanos = 10_000_000_000;
+
     // create channels
     let (ublox_tx, mut ublox_rx) = mpsc::channel(16);
 
@@ -88,14 +103,30 @@ async fn main() -> Result<(), Error> {
     let time_source = Time {};
 
     let user_profile = User::default();
-    let cfg = Config::static_preset(Method::SPP);
 
-    let mut ppp = PPP::new_survey(almanac, frame, cfg, orbit_source, time_source, bias);
+    let mut cfg = Config::static_preset(Method::SPP);
+    cfg.min_sv_elev = Some(1.0);
+
+    info!("deployed with {:#?}", cfg);
+
+    let (x_km, y_km, z_km) = (4604.427, 373.312, 4383.065);
+    let (x_m, y_m, z_m) = (x_km * 1.0e3, y_km * 1e3, z_km * 1e3);
+
+    // let mut ppp = PPP::new_survey(almanac, frame, cfg, orbit_source, time_source, bias);
+    let mut ppp = PPP::new(
+        almanac,
+        frame,
+        cfg,
+        orbit_source,
+        time_source,
+        bias,
+        Some((x_m, y_m, z_m)),
+    );
 
     // deploy hardware
     let mut ublox = Ublox::new(opts, ublox_tx);
 
-    ublox.init();
+    ublox.init(sampling_period_nanos);
 
     tokio::spawn(async move {
         ublox.tasklet().await;

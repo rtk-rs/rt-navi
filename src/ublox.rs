@@ -3,9 +3,10 @@ use chrono::prelude::*;
 use std::time::Duration as StdDuration;
 
 use ublox::{
-    CfgMsgAllPorts, CfgMsgAllPortsBuilder, GpsFix, MgaGloEph, MgaGpsEph, MgaGpsIono, NavEoe,
-    NavHpPosEcef, NavPvt, PacketRef as UbxPacketRef, Parser as UbxParser, Position as UbxPosition,
-    RxmRawx, UbxPacketMeta, Velocity as UbxVelocity,
+    cfg_val::CfgVal, AlignmentToReferenceTime, CfgLayerSet, CfgMsgAllPorts, CfgMsgAllPortsBuilder,
+    CfgRate, CfgRateBuilder, CfgValSetBuilder, GnssFixType, NavEoe, NavPvt,
+    PacketRef as UbxPacketRef, Parser as UbxParser, Position as UbxPosition, RxmRawx,
+    UbxPacketMeta, Velocity as UbxVelocity,
 };
 
 use std::io::{ErrorKind as IoErrorKind, Result as IoResult};
@@ -15,11 +16,9 @@ use serialport::{
     SerialPort, StopBits as SerialStopBits,
 };
 
-use tokio::sync::mpsc::{Receiver, Sender};
+use tokio::sync::mpsc::Sender;
 
-use gnss_rtk::prelude::{
-    Candidate, Carrier, Constellation, Duration, Epoch, Observation, TimeScale, SV,
-};
+use gnss_rtk::prelude::{Candidate, Carrier, Constellation, Epoch, Observation, TimeScale, SV};
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -45,15 +44,12 @@ pub struct Ublox {
 fn gnss_rtk_id(gnss_id: u8) -> Result<Constellation, Error> {
     match gnss_id {
         0 => Ok(Constellation::GPS),
-        1 => Ok(Constellation::Galileo),
+        1 => Ok(Constellation::SBAS),
+        2 => Ok(Constellation::Galileo),
+        3 => Ok(Constellation::BeiDou),
+        5 => Ok(Constellation::QZSS),
+        6 => Ok(Constellation::Glonass),
         id => Err(Error::NonSupportedGnss(id)),
-    }
-}
-
-fn freq_rtk_id(freq_id: u8) -> Result<Carrier, Error> {
-    match freq_id {
-        0 => Ok(Carrier::default()),
-        id => Err(Error::NonSupportedSignal(id)),
     }
 }
 
@@ -69,7 +65,7 @@ impl Ublox {
             .flow_control(SerialFlowControl::None)
             .open()
             .unwrap_or_else(|e| {
-                panic!("failed to open port {}: {}", port, e);
+                panic!("Failed to open port {}: {}", port, e);
             });
 
         Self {
@@ -80,24 +76,65 @@ impl Ublox {
     }
 
     /// Initialize hardware device
-    pub fn init(&mut self) {
+    pub fn init(&mut self, sampling_period_nanos: u64) {
+        // activate GPS + QZSS + Galileo
+        let mut cfg_data = Vec::<CfgVal>::new();
+
+        cfg_data.push(CfgVal::SignalGpsEna(true));
+        cfg_data.push(CfgVal::SignalQzssEna(true));
+        cfg_data.push(CfgVal::SignalGpsL1caEna(true));
+        cfg_data.push(CfgVal::SignalGpsL2cEna(true));
+        cfg_data.push(CfgVal::UndocumentedL5Enable(false));
+
+        cfg_data.push(CfgVal::SignalGloEna(false));
+        cfg_data.push(CfgVal::SignalGloL1Ena(false));
+        cfg_data.push(CfgVal::SignalGLoL2Ena(false));
+
+        cfg_data.push(CfgVal::SignalGalEna(true));
+        cfg_data.push(CfgVal::SignalGalE1Ena(true));
+        cfg_data.push(CfgVal::SignalGalE5bEna(true));
+
+        CfgValSetBuilder {
+            version: 0,
+            layers: CfgLayerSet::RAM,
+            reserved1: 0,
+            cfg_data: &cfg_data,
+        };
+
         self.write_acked(
             CfgMsgAllPorts,
             &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
         )
-        .unwrap_or_else(|e| panic!("failed to activate NavPvt msg: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to activate NavPvt msg: {}", e));
 
         self.write_acked(
             CfgMsgAllPorts,
             &CfgMsgAllPortsBuilder::set_rate_for::<NavEoe>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
         )
-        .unwrap_or_else(|e| panic!("failed to activate NavEoe msg: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to activate NavEoe msg: {}", e));
 
         self.write_acked(
             CfgMsgAllPorts,
             &CfgMsgAllPortsBuilder::set_rate_for::<RxmRawx>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
         )
-        .unwrap_or_else(|e| panic!("failed to activate RxmRawx msg: {}", e));
+        .unwrap_or_else(|e| panic!("Failed to activate RxmRawx msg: {}", e));
+
+        let measure_rate_ms = (sampling_period_nanos / 1_000_000) as u16;
+        let time_ref = AlignmentToReferenceTime::Gps;
+
+        self.write_all(
+            &CfgRateBuilder {
+                measure_rate_ms,
+                nav_rate: 10,
+                time_ref,
+            }
+            .into_packet_bytes(),
+        )
+        .unwrap_or_else(|e| panic!("Failed to set measurement rate: {}", e));
+
+        self.wait_for_ack::<CfgRate>().unwrap_or_else(|e| {
+            panic!("Failed to set measurement rate: {}", e);
+        });
     }
 
     /// Writes all bytes to device
@@ -152,7 +189,7 @@ impl Ublox {
 
             // parser.consume adds the buffer to its internal buffer, and
             // returns an iterator-like object we can use to process the packets
-            let mut it = self.parser.consume(&local_buf[..nbytes]);
+            let mut it = self.parser.consume_ubx(&local_buf[..nbytes]);
 
             loop {
                 match it.next() {
@@ -174,7 +211,7 @@ impl Ublox {
 
     /// Main tasklet
     pub async fn tasklet(&mut self) {
-        let mut candidates = Vec::with_capacity(8);
+        let mut candidates = Vec::<Candidate>::with_capacity(8);
 
         loop {
             match self.update(|packet| match packet {
@@ -196,16 +233,9 @@ impl Ublox {
                     candidates.clear();
 
                     for meas in rawx.measurements() {
-                        let freq_id = meas.freq_id();
                         let gnss_id = meas.gnss_id();
 
-                        let carrier = match freq_rtk_id(freq_id) {
-                            Ok(carrier) => carrier,
-                            Err(e) => {
-                                error!("non supported signal (freq): {}", e);
-                                continue;
-                            },
-                        };
+                        let carrier = Carrier::L1;
 
                         let constell = match gnss_rtk_id(gnss_id) {
                             Ok(constell) => constell,
@@ -217,22 +247,29 @@ impl Ublox {
 
                         let sv = SV::new(constell, meas.sv_id());
 
-                        let observations = vec![
-                            Observation::pseudo_range(carrier, meas.pr_mes(), None),
-                            Observation::ambiguous_phase_range(carrier, meas.cp_mes(), None),
-                        ];
+                        if let Some(candidate) = candidates
+                            .iter_mut()
+                            .find(|cd| cd.t == t_gpst && cd.sv == sv)
+                        {
+                            candidate.set_pseudo_range_m(carrier, meas.pr_mes());
+                            candidate.set_ambiguous_phase_range_m(carrier, meas.cp_mes());
+                        } else {
+                            let observations = vec![
+                                Observation::pseudo_range(carrier, meas.pr_mes(), None),
+                                Observation::ambiguous_phase_range(carrier, meas.cp_mes(), None),
+                            ];
 
-                        let candidate = Candidate::new(sv, t_gpst, observations);
-
-                        candidates.push(candidate);
+                            candidates.push(Candidate::new(sv, t_gpst, observations));
+                        }
                     }
                 },
                 UbxPacketRef::NavPvt(sol) => {
-                    let has_time = sol.fix_type() == GpsFix::Fix3D
-                        || sol.fix_type() == GpsFix::GPSPlusDeadReckoning
-                        || sol.fix_type() == GpsFix::TimeOnlyFix;
-                    let has_posvel = sol.fix_type() == GpsFix::Fix3D
-                        || sol.fix_type() == GpsFix::GPSPlusDeadReckoning;
+                    let has_time = sol.fix_type() == GnssFixType::Fix3D
+                        || sol.fix_type() == GnssFixType::GPSPlusDeadReckoning
+                        || sol.fix_type() == GnssFixType::TimeOnlyFix;
+
+                    let has_posvel = sol.fix_type() == GnssFixType::Fix3D
+                        || sol.fix_type() == GnssFixType::GPSPlusDeadReckoning;
 
                     if has_posvel {
                         let pos: UbxPosition = (&sol).into();
@@ -268,7 +305,7 @@ impl Ublox {
                     info!("{:?}", msg);
                 },
                 _ => {
-                    trace!("unhandled {:?}", packet);
+                    trace!("unhandled message {:?}", packet);
                 },
             }) {
                 Ok(_) => {},
@@ -281,7 +318,7 @@ impl Ublox {
                 match self.tx.send(Message::Proposal(candidates.clone())).await {
                     Ok(_) => {},
                     Err(e) => {
-                        error!("failed to propose new candidates: {}", e);
+                        error!("Failed to propose new candidates: {}", e);
                     },
                 }
 

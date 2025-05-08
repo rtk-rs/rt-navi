@@ -20,10 +20,10 @@ readme = "README.md"
 log = "0.4"
 thiserror = "2"
 env_logger = "0.11.8"
-
-ublox = "0.5.0"
 chrono = "0.4.29"
+
 serialport = "4.7"
+ublox = { git = "https://github.com/ublox-rs/ublox", branch = "master" }
 
 rtcm-rs = "0.11"
 
