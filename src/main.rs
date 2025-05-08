@@ -1,9 +1,9 @@
-//! High precision navigation, in real time
-
-// private
+//! Real-time navigation
 mod cli;
+mod rtcm;
 mod ublox;
 
+use anise::{constants::frames::EARTH_J2000, prelude::Almanac};
 use env_logger::{Builder, Target};
 
 #[macro_use]
@@ -13,11 +13,12 @@ use cli::Cli;
 use thiserror::Error;
 
 use gnss_rtk::prelude::{
-    Config, Error as RTKError, InvalidationCause, IonosphereBias, Method, Solver, TroposphereBias,
+    AbsoluteTime, Bias, BiasRuntime, Config, Epoch, Frame, Method, Orbit, OrbitSource, TimeScale,
+    User, PPP, SV,
 };
 
 use tokio::sync::mpsc;
-use ublox::{Command, Message, Ublox};
+use ublox::{Message, Ublox};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -27,9 +28,40 @@ pub enum Error {
     NonSupportedSignal(u8),
 }
 
+struct Time {}
+
+impl AbsoluteTime for Time {
+    fn new_epoch(&mut self, _: Epoch) {}
+
+    fn epoch_correction(&self, t: Epoch, target: TimeScale) -> Epoch {
+        t.to_time_scale(target)
+    }
+}
+
+struct NullOrbit {}
+
+impl OrbitSource for NullOrbit {
+    fn next_at(&mut self, epoch: Epoch, sv: SV, frame: Frame) -> Option<Orbit> {
+        None
+    }
+}
+
+struct NullBias {}
+
+impl Bias for NullBias {
+    fn troposphere_bias_m(&self, _: &BiasRuntime) -> f64 {
+        0.0
+    }
+
+    fn ionosphere_bias_m(&self, _: &BiasRuntime) -> f64 {
+        0.0
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let mut builder = Builder::from_default_env();
+
     builder
         .target(Target::Stdout)
         .format_timestamp_secs()
@@ -40,119 +72,50 @@ async fn main() -> Result<(), Error> {
     let cli = Cli::new();
     let opts = cli.serial_opts();
 
-    // create channels
-    let (ublox_tx, mut rx) = mpsc::channel(16);
-    let (tx, mut ublox_rx) = mpsc::channel(16);
-
-    let method = Method::SPP;
-    let cfg = Config::static_preset(method);
-
-    let mut solver = Solver::new(&cfg, None, |t, sv, _| None)
-        .unwrap_or_else(|e| panic!("failed to deploy solver: {}", e));
-
-    // deploy hardware
-    let mut ublox = Ublox::new(opts, ublox_rx, ublox_tx);
-    ublox.init();
-    tokio::spawn(async move {
-        ublox.tasklet();
+    let almanac = Almanac::until_2035().unwrap_or_else(|e| {
+        panic!("Failed to obtain Almanac definition: {}", e);
     });
 
-    let mut ionod = IonosphereBias::default();
-    let mut tropod = TroposphereBias::default();
+    let frame = almanac.frame_from_uid(EARTH_J2000).unwrap_or_else(|e| {
+        panic!("Failed to obtain Frame definition: {}", e);
+    });
+
+    // create channels
+    let (ublox_tx, mut ublox_rx) = mpsc::channel(16);
+
+    let bias = NullBias {};
+    let orbit_source = NullOrbit {};
+    let time_source = Time {};
+
+    let user_profile = User::default();
+    let cfg = Config::static_preset(Method::SPP);
+
+    let mut ppp = PPP::new_survey(almanac, frame, cfg, orbit_source, time_source, bias);
+
+    // deploy hardware
+    let mut ublox = Ublox::new(opts, ublox_tx);
+
+    ublox.init();
+
+    tokio::spawn(async move {
+        ublox.tasklet().await;
+    });
 
     loop {
-        while let Some(msg) = rx.recv().await {
+        while let Some(msg) = ublox_rx.recv().await {
             match msg {
-                Message::Candidates((t, candidates)) => {
-                    match solver.resolve(t, &candidates, &ionod, &tropod) {
-                        Ok((_, solution)) => {
-                            let (x, y, z) = (
-                                solution.position.x,
-                                solution.position.y,
-                                solution.position.z,
-                            );
-                            let (vel_x, vel_y, vel_z) = (
-                                solution.velocity.x,
-                                solution.velocity.y,
-                                solution.velocity.z,
-                            );
-                            let dt = solution.dt;
-                            info!("new solution");
-                            info!("x={}, y={}, z={}", x, y, z);
-                            info!("vel_x={}, vel_y={}, vel_z={}", vel_x, vel_y, vel_z);
-                            info!("dt={}", dt);
+                Message::Proposal(candidates) => {
+                    let epoch = candidates[0].t;
+
+                    match ppp.resolve(user_profile, epoch, &candidates) {
+                        Ok(pvt) => {
+                            let (lat, long, alt) = pvt.lat_long_alt_deg_deg_m;
+
+                            info!("new solution | lat={:.6}° long={:.6} alt={:.6}m | dt={:.6E}s drift={:.6E}s/s", 
+                                lat, long, alt, pvt.clock_offset_s ,pvt.clock_drift_s_s);
                         },
-                        Err(e) => match e {
-                            RTKError::Almanac(e) => {
-                                panic!("failed to load latest almanac: {}", e);
-                            },
-                            RTKError::NotEnoughCandidates => {
-                                error!("not enough candidates");
-                            },
-                            RTKError::NotEnoughMatchingCandidates => {
-                                error!("not enough quality candidates");
-                            },
-                            RTKError::MatrixError
-                            | RTKError::NavigationError
-                            | RTKError::MatrixInversionError => {
-                                error!("navigation error");
-                                warn!("check configuration setup");
-                            },
-                            RTKError::MissingPseudoRange | RTKError::PseudoRangeCombination => {
-                                error!("missing pseudo range observation");
-                            },
-                            RTKError::PhaseRangeCombination => {
-                                error!("missing pseudo range observation");
-                            },
-                            RTKError::UnresolvedState => {
-                                error!("solver internal error");
-                            },
-                            RTKError::UnresolvedAmbiguity => {
-                                error!("solver internal error (ambiguity)");
-                            },
-                            RTKError::InvalidStrategy => error!("invalid solving strategy"),
-                            RTKError::BancroftError => {
-                                error!("bancroft error");
-                                warn!("check configuration setup");
-                            },
-                            RTKError::BancroftImaginarySolution => {
-                                error!("imaginary solution");
-                                warn!("check configuration setup");
-                            },
-                            RTKError::FirstGuess => {
-                                error!("first guess error");
-                                warn!("check configuration setup");
-                            },
-                            RTKError::TimeIsNan => {
-                                error!("resolved time is NaN");
-                                warn!("check configuration setup");
-                            },
-                            RTKError::PhysicalNonSenseRxPriorTx
-                            | RTKError::PhysicalNonSenseRxTooLate => {
-                                error!("physical non sense");
-                                warn!("check configuration setup");
-                            },
-                            RTKError::Physics(e) => {
-                                error!("physical non sense: {}", e);
-                                warn!("check configuration setup");
-                            },
-                            RTKError::InvalidatedSolution(cause) => match cause {
-                                InvalidationCause::FirstSolution => {
-                                    info!("first fix is pending!");
-                                },
-                                InvalidationCause::GDOPOutlier(gdop) => {
-                                    error!("solution rejected: gdop={}", gdop);
-                                },
-                                InvalidationCause::TDOPOutlier(tdop) => {
-                                    error!("solution rejected: tdop={}", tdop);
-                                },
-                                InvalidationCause::InnovationOutlier(innov) => {
-                                    error!("solution rejected: innov={}", innov);
-                                },
-                                InvalidationCause::CodeResidual(code_res) => {
-                                    error!("solution rejected: code_res={}", code_res);
-                                },
-                            },
+                        Err(e) => {
+                            error!("ppp error: {}", e);
                         },
                     }
                 },

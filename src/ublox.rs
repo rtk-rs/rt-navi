@@ -18,17 +18,12 @@ use serialport::{
 use tokio::sync::mpsc::{Receiver, Sender};
 
 use gnss_rtk::prelude::{
-    Candidate, Carrier, Constellation, Duration, Epoch, PhaseRange, PseudoRange, TimeScale, SV,
+    Candidate, Carrier, Constellation, Duration, Epoch, Observation, TimeScale, SV,
 };
 
 #[derive(Debug, Clone)]
-pub enum Command {
-    AbortCandidates,
-}
-
-#[derive(Debug, Clone)]
 pub enum Message {
-    Candidates((Epoch, Vec<Candidate>)),
+    Proposal(Vec<Candidate>),
 }
 
 pub struct SerialOpts {
@@ -36,22 +31,14 @@ pub struct SerialOpts {
     pub baud: u32,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-struct Tow {
-    pub tow: u32,
-    pub week: u32,
-}
-
-impl Tow {
-    fn epoch(&self, ts: TimeScale) -> Epoch {
-        Epoch::from_time_of_week(self.week, self.tow as u64 * 1_000_000, ts)
-    }
-}
-
 pub struct Ublox {
-    rx: Receiver<Command>,
+    /// TX port
     tx: Sender<Message>,
+
+    /// Serial port
     port: Box<dyn SerialPort>,
+
+    /// Parser
     parser: UbxParser<Vec<u8>>,
 }
 
@@ -71,8 +58,8 @@ fn freq_rtk_id(freq_id: u8) -> Result<Carrier, Error> {
 }
 
 impl Ublox {
-    /// Builds new Ublox device
-    pub fn new(opts: SerialOpts, rx: Receiver<Command>, tx: Sender<Message>) -> Self {
+    /// Builds new [Ublox] device
+    pub fn new(opts: SerialOpts, tx: Sender<Message>) -> Self {
         let port = opts.port.clone();
         let port = serialport::new(opts.port, opts.baud)
             .stop_bits(SerialStopBits::One)
@@ -84,8 +71,8 @@ impl Ublox {
             .unwrap_or_else(|e| {
                 panic!("failed to open port {}: {}", port, e);
             });
+
         Self {
-            rx,
             tx,
             port,
             parser: Default::default(),
@@ -157,6 +144,7 @@ impl Ublox {
         loop {
             const MAX_PAYLOAD_LEN: usize = 1240;
             let mut local_buf = [0; MAX_PAYLOAD_LEN];
+
             let nbytes = self.read_port(&mut local_buf)?;
             if nbytes == 0 {
                 break;
@@ -165,6 +153,7 @@ impl Ublox {
             // parser.consume adds the buffer to its internal buffer, and
             // returns an iterator-like object we can use to process the packets
             let mut it = self.parser.consume(&local_buf[..nbytes]);
+
             loop {
                 match it.next() {
                     Some(Ok(packet)) => {
@@ -184,21 +173,10 @@ impl Ublox {
     }
 
     /// Main tasklet
-    pub fn tasklet(&mut self) {
-        let mut sv = SV::default();
-        let mut tow = Tow::default();
-        let mut carrier = Carrier::default();
-        let mut gnss = Constellation::default();
-        let mut candidates = Vec::<Candidate>::with_capacity(16);
+    pub async fn tasklet(&mut self) {
+        let mut candidates = Vec::with_capacity(8);
+
         loop {
-            while let Ok(cmd) = self.rx.try_recv() {
-                match cmd {
-                    Command::AbortCandidates => {
-                        info!("cancelled {} candidates", candidates.len());
-                        candidates.clear();
-                    },
-                }
-            }
             match self.update(|packet| match packet {
                 UbxPacketRef::MonVer(packet) => {
                     info!(
@@ -208,47 +186,44 @@ impl Ublox {
                         packet.extension().collect::<Vec<&str>>()
                     );
                 },
-                UbxPacketRef::NavEoe(_) => {},
                 UbxPacketRef::RxmRawx(rawx) => {
-                    debug!("{} new measurements", rawx.num_meas());
+                    let week = rawx.week() as u32;
+                    let nanos = rawx.rcv_tow().round() as u64 * 1_000_000_000;
+                    let t_gpst = Epoch::from_time_of_week(week, nanos, TimeScale::GPST);
+
+                    debug!("{} new measurements", t_gpst);
+
+                    candidates.clear();
+
                     for meas in rawx.measurements() {
-                        let cno = meas.cno();
                         let freq_id = meas.freq_id();
                         let gnss_id = meas.gnss_id();
 
-                        if let Ok(c) = freq_rtk_id(freq_id) {
-                            carrier = c;
-                        } else {
-                            error!("non supported signal: {}", freq_id);
-                        }
+                        let carrier = match freq_rtk_id(freq_id) {
+                            Ok(carrier) => carrier,
+                            Err(e) => {
+                                error!("non supported signal (freq): {}", e);
+                                continue;
+                            },
+                        };
 
-                        if let Ok(g) = gnss_rtk_id(gnss_id) {
-                            gnss = g;
-                        } else {
-                            error!("non supported gnss: {}", gnss_id);
-                        }
+                        let constell = match gnss_rtk_id(gnss_id) {
+                            Ok(constell) => constell,
+                            Err(e) => {
+                                error!("non supported constellation: {}", e);
+                                continue;
+                            },
+                        };
 
-                        let cp_mes = meas.cp_mes();
-                        let do_mes = meas.do_mes();
-                        let pr_mes = meas.pr_mes();
+                        let sv = SV::new(constell, meas.sv_id());
 
-                        candidates.push(Candidate::new(
-                            sv,
-                            tow.epoch(TimeScale::GPST), //TODO
-                            Duration::default(),
-                            None,
-                            vec![PseudoRange {
-                                carrier,
-                                value: pr_mes,
-                                snr: None, //TODO
-                            }],
-                            vec![PhaseRange {
-                                carrier,
-                                value: cp_mes,
-                                snr: None,       //TODO
-                                ambiguity: None, //TODO ?
-                            }],
-                        ));
+                        let observations = vec![
+                            Observation::pseudo_range(carrier, meas.pr_mes(), None),
+                            Observation::ambiguous_phase_range(carrier, meas.cp_mes(), None),
+                        ];
+
+                        let candidate = Candidate::new(sv, t_gpst, observations);
+                        candidates.push(candidate);
                     }
                 },
                 UbxPacketRef::NavPvt(sol) => {
@@ -292,11 +267,24 @@ impl Ublox {
                     info!("{:?}", msg);
                 },
                 _ => {
-                    trace!("{:?}", packet);
+                    trace!("unhandled {:?}", packet);
                 },
             }) {
                 Ok(_) => {},
-                Err(e) => {},
+                Err(e) => {
+                    error!("ublox error: {}", e);
+                },
+            }
+
+            if candidates.len() > 0 {
+                match self.tx.send(Message::Proposal(candidates.clone())).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        error!("failed to propose new candidates: {}", e);
+                    },
+                }
+
+                candidates.clear();
             }
         }
     }
