@@ -223,6 +223,7 @@ impl Ublox {
                         ];
 
                         let candidate = Candidate::new(sv, t_gpst, observations);
+
                         candidates.push(candidate);
                     }
                 },
@@ -236,21 +237,21 @@ impl Ublox {
                     if has_posvel {
                         let pos: UbxPosition = (&sol).into();
                         let vel: UbxVelocity = (&sol).into();
-                        info!(
-                            "Ubx Latitude: {:.5} Longitude: {:.5} Altitude: {:.2}m",
+
+                        debug!(
+                            "ublox lat={:.6}° long={:.6}° alt={:.3}m",
                             pos.lat, pos.lon, pos.alt
                         );
-                        info!(
-                            "Ubx Velocity: {:.2} m/s Heading: {:.2} degrees",
-                            vel.speed, vel.heading
-                        );
+
+                        debug!("ublox vel={:.2}m/s heading={:.2}°", vel.speed, vel.heading);
                     }
 
                     if has_time {
                         let time: DateTime<Utc> = (&sol)
                             .try_into()
                             .expect("Could not parse NAV-PVT time field to UTC");
-                        println!("Time: {:?}", time);
+
+                        debug!("ublox absolute time: {}", time);
                     }
                 },
                 // Others

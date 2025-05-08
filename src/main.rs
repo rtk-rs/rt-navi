@@ -106,6 +106,7 @@ async fn main() -> Result<(), Error> {
             match msg {
                 Message::Proposal(candidates) => {
                     let epoch = candidates[0].t;
+                    debug!("{} - new proposal ({} candidates)", epoch, candidates.len());
 
                     match ppp.resolve(user_profile, epoch, &candidates) {
                         Ok(pvt) => {
