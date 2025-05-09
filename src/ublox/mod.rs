@@ -1,19 +1,20 @@
-use crate::Error;
+use crate::{cli::SerialPortOpts, clock::ClockBuffer, Error};
 use chrono::prelude::*;
 use std::time::Duration as StdDuration;
 
-use ublox::{
-    cfg_val::CfgVal, AlignmentToReferenceTime, CfgLayerSet, CfgMsgAllPorts, CfgMsgAllPortsBuilder,
-    CfgRate, CfgRateBuilder, CfgValSetBuilder, GnssFixType, MgaGpsEph, MgaGpsEphRef, NavEoe,
-    NavPvt, PacketRef as UbxPacketRef, Parser as UbxParser, Position as UbxPosition, RxmRawx,
-    UbxPacketMeta, Velocity as UbxVelocity,
-};
+mod device;
+use device::Device;
 
-use std::io::{ErrorKind as IoErrorKind, Result as IoResult};
+use ublox::{
+    cfg_val::CfgVal, AlignmentToReferenceTime, CfgLayerSet, CfgMsgAllPortsBuilder, CfgRate,
+    CfgRateBuilder, CfgValSetBuilder, GnssFixType, GpsDataWord, MgaGloEph, MgaGpsEph, MonVer,
+    NavPvt, PacketRef as UbxPacketRef, Position as UbxPosition, RxmRawx, RxmSfrbx,
+    RxmSfrbxInterprated, UbxPacketRequest, Velocity as UbxVelocity,
+};
 
 use serialport::{
     DataBits as SerialDataBits, FlowControl as SerialFlowControl, Parity as SerialParity,
-    SerialPort, StopBits as SerialStopBits,
+    StopBits as SerialStopBits,
 };
 
 use tokio::sync::mpsc::Sender;
@@ -23,9 +24,6 @@ use gnss_rtk::prelude::{Candidate, Carrier, Constellation, Epoch, Observation, T
 use crate::{clock::SvClock, kepler::SvKepler};
 
 pub enum Message {
-    /// SV clock update
-    SvClock(SvClock),
-
     /// SV Kepler update
     SvKepler(SvKepler),
 
@@ -33,20 +31,12 @@ pub enum Message {
     Proposal(Vec<Candidate>),
 }
 
-pub struct SerialOpts {
-    pub port: String,
-    pub baud: u32,
-}
-
 pub struct Ublox {
     /// TX port
     tx: Sender<Message>,
 
-    /// Serial port
-    port: Box<dyn SerialPort>,
-
-    /// Parser
-    parser: UbxParser<Vec<u8>>,
+    /// Decoding [Device]
+    device: Device,
 }
 
 fn gnss_rtk_id(gnss_id: u8) -> Result<Constellation, Error> {
@@ -63,9 +53,8 @@ fn gnss_rtk_id(gnss_id: u8) -> Result<Constellation, Error> {
 
 impl Ublox {
     /// Builds new [Ublox] device
-    pub fn new(opts: SerialOpts, tx: Sender<Message>) -> Self {
-        let port = opts.port.clone();
-        let port = serialport::new(opts.port, opts.baud)
+    pub fn new(opts: SerialPortOpts, tx: Sender<Message>) -> Self {
+        let port = serialport::new(&opts.port_name, opts.port_baud)
             .stop_bits(SerialStopBits::One)
             .data_bits(SerialDataBits::Eight)
             .timeout(StdDuration::from_millis(10))
@@ -73,13 +62,12 @@ impl Ublox {
             .flow_control(SerialFlowControl::None)
             .open()
             .unwrap_or_else(|e| {
-                panic!("Failed to open port {}: {}", port, e);
+                panic!("Failed to open port {}: {}", opts.port_name, e);
             });
 
         Self {
             tx,
-            port,
-            parser: Default::default(),
+            device: Device::new(port),
         }
     }
 
@@ -90,9 +78,10 @@ impl Ublox {
 
         cfg_data.push(CfgVal::SignalGpsEna(true));
         cfg_data.push(CfgVal::SignalQzssEna(true));
+
         cfg_data.push(CfgVal::SignalGpsL1caEna(true));
         cfg_data.push(CfgVal::SignalGpsL2cEna(true));
-        cfg_data.push(CfgVal::UndocumentedL5Enable(false));
+        cfg_data.push(CfgVal::UndocumentedL5Enable(true));
 
         cfg_data.push(CfgVal::SignalGloEna(false));
         cfg_data.push(CfgVal::SignalGloL1Ena(false));
@@ -109,125 +98,82 @@ impl Ublox {
             cfg_data: &cfg_data,
         };
 
-        self.write_acked::<CfgMsgAllPorts>(
-            &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
-        )
-        .unwrap_or_else(|e| panic!("Failed to activate NavPvt msg: {}", e));
+        debug!("UBX-RXM-RAWX");
 
-        self.write_acked::<CfgMsgAllPorts>(
-            &CfgMsgAllPortsBuilder::set_rate_for::<NavEoe>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
-        )
-        .unwrap_or_else(|e| panic!("Failed to activate NavEoe msg: {}", e));
+        self.device
+            .write_all(
+                &CfgMsgAllPortsBuilder::set_rate_for::<RxmRawx>([1, 1, 1, 1, 1, 1])
+                    .into_packet_bytes(),
+            )
+            .unwrap_or_else(|e| panic!("Failed to activate RxmRawx msg: {}", e));
 
-        self.write_acked::<CfgMsgAllPorts>(
-            &CfgMsgAllPortsBuilder::set_rate_for::<RxmRawx>([0, 1, 1, 1, 0, 0]).into_packet_bytes(),
-        )
-        .unwrap_or_else(|e| panic!("Failed to activate RxmRawx msg: {}", e));
+        debug!("UBX-NAV-PVT");
 
-        self.write_acked::<CfgMsgAllPorts>(
-            &CfgMsgAllPortsBuilder::set_rate_for::<MgaGpsEph>([0, 1, 1, 1, 0, 0])
-                .into_packet_bytes(),
-        )
-        .unwrap_or_else(|e| panic!("Failed to activate MgaGpsEph msg: {}", e));
+        self.device
+            .write_all(
+                &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([1, 1, 1, 1, 1, 1])
+                    .into_packet_bytes(),
+            )
+            .unwrap_or_else(|e| panic!("Failed to activate NavPvt msg: {}", e));
+
+        debug!("UBX-RXM-SFRBX");
+
+        self.device
+            .write_all(
+                &CfgMsgAllPortsBuilder::set_rate_for::<RxmSfrbx>([1, 1, 1, 1, 1, 1])
+                    .into_packet_bytes(),
+            )
+            .unwrap_or_else(|e| panic!("Failed to activate RxmSfrbx msg: {}", e));
+
+        debug!("UBX-RXM-RATE");
 
         let measure_rate_ms = (sampling_period_nanos / 1_000_000) as u16;
         let time_ref = AlignmentToReferenceTime::Gps;
 
-        self.write_all(
-            &CfgRateBuilder {
-                measure_rate_ms,
-                nav_rate: 10,
-                time_ref,
-            }
-            .into_packet_bytes(),
-        )
-        .unwrap_or_else(|e| panic!("Failed to set measurement rate: {}", e));
+        self.device
+            .write_all(
+                &CfgRateBuilder {
+                    measure_rate_ms,
+                    nav_rate: 10,
+                    time_ref,
+                }
+                .into_packet_bytes(),
+            )
+            .unwrap_or_else(|e| panic!("Failed to set measurement rate: {}", e));
 
-        self.wait_for_ack::<CfgRate>().unwrap_or_else(|e| {
+        self.device.wait_for_ack::<CfgRate>().unwrap_or_else(|e| {
             panic!("Failed to set measurement rate: {}", e);
         });
-    }
 
-    /// Writes all bytes to device
-    pub fn write_all(&mut self, data: &[u8]) -> IoResult<()> {
-        self.port.write_all(data)
-    }
+        debug!("UBX-MON-VER");
 
-    /// Writes message and waits for ack
-    pub fn write_acked<M: UbxPacketMeta>(&mut self, data: &[u8]) -> IoResult<()> {
-        self.port.write_all(data)?;
-        self.wait_for_ack::<M>()
-    }
+        self.device
+            .write_all(&UbxPacketRequest::request_for::<MonVer>().into_packet_bytes())
+            .unwrap_or_else(|e| panic!("Failed to request UBX-MON-VER: {}", e));
 
-    /// Wait for ACK from device
-    pub fn wait_for_ack<T: UbxPacketMeta>(&mut self) -> std::io::Result<()> {
-        let mut found_packet = false;
-        while !found_packet {
-            self.update(|packet| {
-                if let UbxPacketRef::AckAck(ack) = packet {
-                    if ack.class() == T::CLASS && ack.msg_id() == T::ID {
-                        found_packet = true;
-                    }
-                }
-            })?;
-        }
-        Ok(())
-    }
-
-    /// Reads serial port into buffer
-    fn read_port(&mut self, output: &mut [u8]) -> IoResult<usize> {
-        match self.port.read(output) {
-            Ok(b) => Ok(b),
-            Err(e) => {
-                if e.kind() == IoErrorKind::TimedOut {
-                    Ok(0)
-                } else {
-                    Err(e)
-                }
+        let _ = self.device.on_data_available(|packet| match packet {
+            UbxPacketRef::MonVer(monver) => {
+                debug!(
+                    "ublox: hw-version: {}, sw-version: {} , extensions: {:?}",
+                    monver.hardware_version(),
+                    monver.software_version(),
+                    monver.extension().collect::<Vec<&str>>(),
+                );
             },
-        }
-    }
+            _ => {},
+        });
 
-    pub fn update<T: FnMut(UbxPacketRef)>(&mut self, mut cb: T) -> IoResult<()> {
-        loop {
-            const MAX_PAYLOAD_LEN: usize = 1240;
-            let mut local_buf = [0; MAX_PAYLOAD_LEN];
-
-            let nbytes = self.read_port(&mut local_buf)?;
-            if nbytes == 0 {
-                break;
-            }
-
-            // parser.consume adds the buffer to its internal buffer, and
-            // returns an iterator-like object we can use to process the packets
-            let mut it = self.parser.consume_ubx(&local_buf[..nbytes]);
-
-            loop {
-                match it.next() {
-                    Some(Ok(packet)) => {
-                        cb(packet);
-                    },
-                    Some(Err(_)) => {
-                        // Received a malformed packet, ignore it
-                    },
-                    None => {
-                        // We've eaten all the packets we have
-                        break;
-                    },
-                }
-            }
-        }
-        Ok(())
+        debug!("ublox initialized!");
     }
 
     /// Main tasklet
     pub async fn tasklet(&mut self) {
-        let mut candidates = Vec::<Candidate>::with_capacity(8);
+        let mut clock_buf = ClockBuffer::new();
         let mut sv_kepler = Vec::<SvKepler>::with_capacity(8);
-        let mut sv_clock = Vec::<SvClock>::with_capacity(8);
+        let mut candidates = Vec::<Candidate>::with_capacity(8);
 
         loop {
-            match self.update(|packet| match packet {
+            match self.device.on_data_available(|packet| match packet {
                 UbxPacketRef::MonVer(packet) => {
                     info!(
                         "SW version: {} HW version: {}; Extensions: {:?}",
@@ -260,19 +206,25 @@ impl Ublox {
 
                         let sv = SV::new(constell, meas.sv_id());
 
-                        if let Some(candidate) = candidates
-                            .iter_mut()
-                            .find(|cd| cd.t == t_gpst && cd.sv == sv)
-                        {
+                        if let Some(candidate) = candidates.iter_mut().find(|cd| cd.sv == sv) {
                             candidate.set_pseudo_range_m(carrier, meas.pr_mes());
                             candidate.set_ambiguous_phase_range_m(carrier, meas.cp_mes());
-                        } else {
-                            let observations = vec![
-                                Observation::pseudo_range(carrier, meas.pr_mes(), None),
-                                Observation::ambiguous_phase_range(carrier, meas.cp_mes(), None),
-                            ];
 
-                            candidates.push(Candidate::new(sv, t_gpst, observations));
+                            if let Some(clock_dt) = clock_buf.clock_correction(sv) {
+                                candidate.set_clock_correction(clock_dt);
+                            }
+                        } else {
+                            let observation =
+                                Observation::ambiguous_phase_range(carrier, meas.cp_mes(), None)
+                                    .with_pseudo_range_m(meas.pr_mes());
+
+                            let mut cd = Candidate::new(sv, t_gpst, vec![observation]);
+
+                            if let Some(clock_dt) = clock_buf.clock_correction(sv) {
+                                cd.set_clock_correction(clock_dt);
+                            }
+
+                            candidates.push(cd);
                         }
                     }
                 },
@@ -306,12 +258,40 @@ impl Ublox {
                     }
                 },
 
-                UbxPacketRef::MgaGpsEph(eph) => {
-                    let health = eph.sv_health(); // TODO
-                    let sv = SV::new(Constellation::GPS, eph.sv_id());
+                UbxPacketRef::RxmSfrbx(sfrbx) => {
+                    // TODO: only for glonass
+                    // let freq_id = sfrbx.freq_id();
+                    // debug!("UBX-SFRBX freq_id={}", freq_id);
 
-                    sv_clock.push(SvClock::new(sv, eph.af0()));
-                    sv_kepler.push(SvKepler::new(sv, eph));
+                    match gnss_rtk_id(sfrbx.gnss_id()) {
+                        Ok(Constellation::GPS) => {
+                            let sv = SV::new(Constellation::GPS, sfrbx.sv_id());
+
+                            for (index, dword) in sfrbx.dwrd().enumerate() {
+                                debug!(
+                                    "UBX-SFRBX ({}) - unknown word={} ={:08X}",
+                                    sv, index, dword
+                                );
+                            }
+
+                            for interprated in sfrbx.interprator() {
+                                match interprated {
+                                    RxmSfrbxInterprated::Gps(GpsDataWord::Telemetry(tlm)) => {
+                                        debug!("UBX-SFRBX ({}) - telemetry: {:?}", sv, tlm);
+                                    },
+                                    RxmSfrbxInterprated::Gps(GpsDataWord::How(how)) => {
+                                        debug!("UBX-SFRBX ({}) - how: {:?}", sv, how);
+                                    },
+                                }
+                            }
+                        },
+                        Ok(constellation) => {
+                            error!("{} is work in progress", constellation);
+                        },
+                        Err(e) => {
+                            error!("non supported constellation: {}", e);
+                        },
+                    };
                 },
 
                 UbxPacketRef::InfTest(msg) => {
@@ -351,22 +331,11 @@ impl Ublox {
                 candidates.clear();
             }
 
-            for msg in sv_clock.iter() {
-                match self.tx.send(Message::SvClock(*msg)).await {
-                    Ok(_) => {},
-                    Err(e) => error!("Failed to update {} clock state: {}", msg.sv, e),
-                }
-            }
-
             for msg in sv_kepler.iter() {
                 match self.tx.send(Message::SvKepler(*msg)).await {
                     Ok(_) => {},
                     Err(e) => error!("Failed to update {} keplerian state: {}", msg.sv, e),
                 }
-            }
-
-            if sv_clock.len() > 0 {
-                sv_clock.clear();
             }
 
             if sv_kepler.len() > 0 {

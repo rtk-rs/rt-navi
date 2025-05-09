@@ -27,22 +27,13 @@ extern crate log;
 
 use thiserror::Error;
 
-use gnss_rtk::prelude::{
-    AbsoluteTime, Almanac, Bias, BiasRuntime, Config, Epoch, Frame, Method, Orbit, OrbitSource,
-    TimeScale, User, EARTH_J2000, PPP, SV,
-};
+use gnss_rtk::prelude::{Almanac, Config, Method, Rc, User, EARTH_J2000, PPP};
 
 use tokio::sync::mpsc;
 
 use ublox::{Message, Ublox};
 
-use crate::{
-    bias::BiasModels,
-    cli::Cli,
-    clock::{ClockBuffer, SvClock},
-    kepler::{KeplerBuffer, SvKepler},
-    time::Time,
-};
+use crate::{bias::BiasModels, cli::Cli, kepler::KeplerBuffer, time::Time};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -65,8 +56,6 @@ async fn main() -> Result<(), Error> {
     // cli and user args
     let cli = Cli::new();
 
-    let opts = cli.serial_opts();
-
     let almanac = Almanac::until_2035().unwrap_or_else(|e| {
         panic!("Failed to obtain Almanac definition: {}", e);
     });
@@ -83,10 +72,12 @@ async fn main() -> Result<(), Error> {
     let bias = BiasModels {};
     let time_source = Time {};
 
+    let kepler_buf = Rc::new(KeplerBuffer::new());
+
     let user_profile = User::default();
     let cfg = Config::static_preset(Method::SPP);
 
-    info!("deployed with {:#?} {:#?}", user_profile, cfg);
+    debug!("deployed with {:#?} {:#?}", user_profile, cfg);
 
     let (x_km, y_km, z_km) = (4604.427, 373.312, 4383.065);
     let (x_m, y_m, z_m) = (x_km * 1.0e3, y_km * 1e3, z_km * 1e3);
@@ -96,20 +87,26 @@ async fn main() -> Result<(), Error> {
         almanac,
         frame,
         cfg,
-        eph_buffer,
+        Rc::clone(&kepler_buf),
         time_source,
         bias,
         Some((x_m, y_m, z_m)),
     );
 
-    // deploy hardware
-    let mut ublox = Ublox::new(opts, ublox_tx);
+    info!("solver deployed");
+    debug!("deploying ublox..");
+
+    let serial_port_opts = cli.serial_port_opts();
+
+    let mut ublox = Ublox::new(serial_port_opts, ublox_tx);
 
     ublox.init(sampling_period_nanos);
 
     tokio::spawn(async move {
         ublox.tasklet().await;
     });
+
+    info!("rt-navi deployed");
 
     loop {
         while let Some(msg) = ublox_rx.recv().await {
@@ -131,12 +128,8 @@ async fn main() -> Result<(), Error> {
                     }
                 },
 
-                Message::SvClock(sv_clock) => {
-                    eph_buffer.latch_clock(sv_clock);
-                },
-
                 Message::SvKepler(sv_kepler) => {
-                    eph_buffer.latch_kepler(sv_kepler);
+                    kepler_buf.latch(sv_kepler);
                 },
             }
         }

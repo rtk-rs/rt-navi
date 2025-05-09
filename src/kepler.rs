@@ -1,23 +1,30 @@
+use log::{debug, error};
+use std::cell::RefCell;
+
 use ublox::MgaGpsEphRef;
 
-use gnss_rtk::prelude::{Epoch, Frame, Orbit, OrbitSource, SV};
+use gnss_rtk::prelude::{Epoch, Frame, Orbit, OrbitSource, TimeScale, SV};
 
 #[derive(Debug, Copy, Clone)]
 pub struct SvKepler {
     pub sv: SV,
-    i_k: f64,
     a: f64,
     e: f64,
     m0: f64,
+    i0: f64,
     cuc: f64,
     cus: f64,
     crc: f64,
     crs: f64,
     cic: f64,
     cis: f64,
+    i_dot: f64,
     delta_n: f64,
     omega: f64,
+    omega0: f64,
     omega_dot: f64,
+    toc: f64,
+    toe: f64,
 }
 
 impl SvKepler {
@@ -32,40 +39,50 @@ impl SvKepler {
             cis: value.cis(),
             crc: value.crc(),
             crs: value.crs(),
-            i_k: value.idot(),
+            i0: value.i0(),
+            toc: value.toc(),
+            toe: value.toe(),
+            i_dot: value.idot(),
             a: value.sqrt_a().powi(2),
             delta_n: value.delta_n(),
             omega: value.omega(),
+            omega0: value.omega(),
             omega_dot: value.omega_dot(),
         }
     }
 }
 
+#[derive(Clone)]
 pub struct KeplerBuffer {
     /// storage
-    buffer: Vec<SvKepler>,
+    buffer: RefCell<Vec<SvKepler>>,
 }
 
 impl KeplerBuffer {
     pub fn new() -> Self {
         Self {
-            buffer: Vec::with_capacity(8),
+            buffer: RefCell::new(Vec::with_capacity(8)),
         }
     }
 
-    pub fn latch(&mut self, kepler: SvKepler) {
-        self.buffer.retain(|buf| buf.sv != kepler.sv);
-        self.buffer.push(kepler);
+    pub fn latch(&self, kepler: SvKepler) {
+        self.buffer.borrow_mut().retain(|buf| buf.sv != kepler.sv);
+        self.buffer.borrow_mut().push(kepler);
     }
 }
 
 impl OrbitSource for KeplerBuffer {
-    fn next_at(&mut self, epoch: Epoch, sv: SV, frame: Frame) -> Option<Orbit> {
-        let sv_data = self.buffer.iter().find(|buf| buf.sv == sv)?;
+    fn next_at(&self, epoch: Epoch, sv: SV, frame: Frame) -> Option<Orbit> {
+        let buffer = self.buffer.borrow();
+        let sv_data = buffer.iter().find(|buf| buf.sv == sv)?;
 
-        let gm_m3_s2 = Constants::gm(sv);
-        let omega = Constants::omega(sv);
-        let dtr_f = Constants::dtr_f(sv);
+        let gm_m3_s2 = 0.0_f64; // Constants::gm(sv);
+        let omega = 0.0_f64; // Constants::omega(sv);
+        let dtr_f = 0.0_f64; // Constants::dtr_f(sv);
+
+        let t_gpst = epoch.to_time_scale(TimeScale::GPST);
+        let (_, t_gpst) = t_gpst.to_time_of_week();
+        let t_k = t_gpst as f64 - sv_data.toe;
 
         let n0 = (gm_m3_s2 / sv_data.a.powi(3)).sqrt(); // average angular vel
         let n = n0 + sv_data.delta_n; // corrected mean angular vel
@@ -86,6 +103,8 @@ impl OrbitSource for KeplerBuffer {
             if i > 10 {
                 break; //ERROR
             }
+
+            e_k_lst = e_k;
         }
 
         if i == 11 {
@@ -134,19 +153,19 @@ impl OrbitSource for KeplerBuffer {
 
         // ascending node longitude correction (RAAN)
         let omega_k = if sv.is_beidou_geo() {
-            sv_data.omega_0 + sv_data.omega_dot * t_k - omega * sv_data.toe
+            sv_data.omega0 + sv_data.omega_dot * t_k - omega * sv_data.toe
         } else {
             // GPS, Galileo, BeiDou_meo
-            (sv_data.omega_0 + sv_data.omega_dot - omega) * t_k - omega * sv_data.toe
+            (sv_data.omega0 + sv_data.omega_dot - omega) * t_k - omega * sv_data.toe
         };
 
         // corrected inclination angle
-        let i_k = sv_data.i_0 + di_k + sv_data.i_dot * t_k;
+        let i_k = sv_data.i0 + di_k + sv_data.i_dot * t_k;
 
         match Orbit::try_keplerian(
-            sv_data.sqrt_a * 1e-3,
+            sv_data.a.sqrt() * 1e-3,
             sv_data.e,
-            sv_data.i_k.to_degrees(),
+            i_k.to_degrees(),
             sv_data.omega_dot.to_degrees(),
             sv_data.omega.to_degrees(),
             v_k.to_degrees(),
@@ -154,11 +173,13 @@ impl OrbitSource for KeplerBuffer {
             frame.with_mu_km3_s2(gm_m3_s2 * 1e-9),
         ) {
             Ok(orbit) => {
-                let posvel_km = orbit.posvel_km();
+                let posvel_km = orbit.to_cartesian_pos_vel();
+
                 debug!(
                     "(anise) {}({}) x_km={}, y_km={} z_km={}",
                     epoch, sv, posvel_km[0], posvel_km[1], posvel_km[2]
                 );
+
                 Some(orbit)
             },
             Err(e) => {
