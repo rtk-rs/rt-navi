@@ -79,18 +79,13 @@ async fn main() -> Result<(), Error> {
 
     debug!("deployed with {:#?} {:#?}", user_profile, cfg);
 
-    let (x_km, y_km, z_km) = (4604.427, 373.312, 4383.065);
-    let (x_m, y_m, z_m) = (x_km * 1.0e3, y_km * 1e3, z_km * 1e3);
-
-    // let mut ppp = PPP::new_survey(almanac, frame, cfg, orbit_source, time_source, bias);
-    let mut ppp = PPP::new(
+    let mut ppp = PPP::new_survey(
         almanac,
         frame,
         cfg,
         Rc::clone(&kepler_buf),
         time_source,
         bias,
-        Some((x_m, y_m, z_m)),
     );
 
     info!("solver deployed");
