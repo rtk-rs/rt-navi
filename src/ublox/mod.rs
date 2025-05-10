@@ -7,9 +7,9 @@ use device::Device;
 
 use ublox::{
     cfg_val::CfgVal, AlignmentToReferenceTime, CfgLayerSet, CfgMsgAllPortsBuilder, CfgRate,
-    CfgRateBuilder, CfgValSetBuilder, GnssFixType, GpsDataWord, MgaGloEph, MgaGpsEph, MonVer,
-    NavPvt, PacketRef as UbxPacketRef, Position as UbxPosition, RxmRawx, RxmSfrbx,
-    RxmSfrbxInterprated, UbxPacketRequest, Velocity as UbxVelocity,
+    CfgRateBuilder, CfgValSetBuilder, GnssFixType, GpsFrame, MgaGloEph, MgaGpsEph, MonVer, NavPvt,
+    PacketRef as UbxPacketRef, Position as UbxPosition, RxmRawx, RxmSfrbx, RxmSfrbxInterprated,
+    UbxPacketRequest, Velocity as UbxVelocity,
 };
 
 use serialport::{
@@ -276,112 +276,10 @@ impl Ublox {
                                 );
                             }
 
-                            for interprated in sfrbx.interprator() {
+                            if let Some(interprated) = sfrbx.interprate() {
                                 match interprated {
-                                    RxmSfrbxInterprated::Gps(gps) => match gps {
-                                        GpsDataWord::Telemetry(tlm) => {
-                                            debug!("UBX-SFRBX ({}) - telemetry: {:?}", sv, tlm);
-                                        },
-                                        GpsDataWord::How(how) => {
-                                            debug!("UBX-SFRBX ({}) - how: {:?}", sv, how);
-                                        },
-                                        GpsDataWord::Subframe2Word3(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #2 word #3 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe2Word4(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #2 word #4 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe2Word5(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #2 word #5 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe2Word6(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #2 word #6 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe2Word7(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #2 word #7 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe2Word8(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #2 word #8 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe2Word9(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #2 word #9 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe2Word10(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #2 word #10 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe3Word3(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #3 word #3 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe3Word4(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #3 word #4 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe3Word5(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #3 word #5 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe3Word6(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #3 word #6 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe3Word7(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #3 word #7 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe3Word8(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #3 word #8 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe3Word9(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #3 word #9 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        GpsDataWord::Subframe3Word10(word) => {
-                                            debug!(
-                                                "UBX-SFRBX ({}) - subframe #3 word #10 {:?}",
-                                                sv, word
-                                            );
-                                        },
-                                        _ => {},
+                                    RxmSfrbxInterprated::GPS(gps) => {
+                                        debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
                                     },
                                 }
                             }
