@@ -2,7 +2,7 @@ use crate::kepler::SVKepler;
 
 use ublox::{GpsEphFrame1, GpsEphFrame2, GpsEphFrame3, GpsFrame, GpsSubframe};
 
-use gnss_rtk::prelude::SV;
+use gnss_rtk::prelude::{ClockCorrection, Duration, Epoch, TimeScale, SV};
 
 #[derive(Debug, Default, Clone)]
 pub struct GpsSvRawEphemeris {
@@ -40,6 +40,39 @@ impl GpsSvRawEphemeris {
 
         Some(SVKepler::from_gps(self.sv, frame1, frame2, frame3))
     }
+
+    fn week_number(t_gpst: Epoch, wn: u16) -> u32 {
+        let current_week = t_gpst.to_time_of_week().0;
+        let delta = current_week - wn as u32;
+        let rollover = (delta as f64 / 1024.0).round() as u32;
+        wn as u32 + rollover * 1024
+    }
+
+    pub fn clock_correction(&self, t: Epoch) -> Option<ClockCorrection> {
+        let (frame1, frame2, frame3) = (
+            self.frame1.as_ref()?,
+            self.frame2.as_ref()?,
+            self.frame3.as_ref()?,
+        );
+
+        let (a0, a1, a2) = (frame1.af0, frame1.af1, frame1.af2);
+
+        let toc_nanos = (frame1.toc as u64) * 1_000_000_000;
+
+        let t_gpst = t.to_time_scale(TimeScale::GPST);
+        let week = Self::week_number(t_gpst, frame1.week);
+
+        let toc_gpst = Epoch::from_time_of_week(week, toc_nanos, TimeScale::GPST);
+
+        let mut dt = (toc_gpst - t_gpst).to_seconds();
+
+        for _ in 0..10 {
+            dt -= a0 + a1 * dt + a2 * dt.powi(2);
+        }
+
+        let dt = Duration::from_seconds(a0 + a1 * dt + a2 * dt.powi(2));
+        Some(ClockCorrection::without_relativistic_correction(dt))
+    }
 }
 
 #[derive(Default)]
@@ -71,6 +104,14 @@ impl EphemerisBuffer {
             let mut new = GpsSvRawEphemeris::default();
             new.sv = sv;
             self.buffer.push(new);
+        }
+    }
+
+    pub fn clock_correction(&self, t: Epoch, sv: SV) -> Option<ClockCorrection> {
+        if let Some(buff) = self.buffer.iter().find(|buf| buf.sv == sv) {
+            buff.clock_correction(t)
+        } else {
+            None
         }
     }
 }

@@ -14,10 +14,10 @@
 
 mod bias;
 mod cli;
-mod clock;
+// mod clock;
 mod ephemeris;
 mod kepler;
-mod rtcm;
+// mod rtcm;
 mod time;
 mod ublox;
 
@@ -76,7 +76,9 @@ async fn main() -> Result<(), Error> {
     let kepler_buf = Rc::new(KeplerBuffer::new());
 
     let user_profile = User::default();
-    let cfg = Config::static_preset(Method::SPP);
+
+    let mut cfg = Config::static_preset(Method::SPP);
+    cfg.min_sv_elev = None;
 
     debug!("deployed with {:#?} {:#?}", user_profile, cfg);
 

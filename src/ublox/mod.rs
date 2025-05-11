@@ -1,4 +1,4 @@
-use crate::{cli::SerialPortOpts, clock::ClockBuffer, ephemeris::EphemerisBuffer, Error};
+use crate::{cli::SerialPortOpts, ephemeris::EphemerisBuffer, Error};
 use chrono::prelude::*;
 use std::time::Duration as StdDuration;
 
@@ -21,7 +21,7 @@ use tokio::sync::mpsc::Sender;
 
 use gnss_rtk::prelude::{Candidate, Carrier, Constellation, Epoch, Observation, TimeScale, SV};
 
-use crate::{clock::SvClock, kepler::SVKepler};
+use crate::kepler::SVKepler;
 
 pub enum Message {
     /// Kepler update
@@ -168,7 +168,6 @@ impl Ublox {
 
     /// Main tasklet
     pub async fn tasklet(&mut self) {
-        let mut clock_buf = ClockBuffer::new();
         let mut eph_buffer = EphemerisBuffer::new();
         let mut candidates = Vec::<Candidate>::with_capacity(8);
 
@@ -188,8 +187,8 @@ impl Ublox {
                     let nanos = rawx.rcv_tow().round() as u64 * 1_000_000_000;
                     let t_gpst = Epoch::from_time_of_week(week, nanos, TimeScale::GPST);
 
-                    debug!("{} new measurements", t_gpst);
                     candidates.clear();
+                    debug!("{} new measurements", t_gpst);
 
                     for meas in rawx.measurements() {
                         let gnss_id = meas.gnss_id();
@@ -210,8 +209,8 @@ impl Ublox {
                             candidate.set_pseudo_range_m(carrier, meas.pr_mes());
                             candidate.set_ambiguous_phase_range_m(carrier, meas.cp_mes());
 
-                            if let Some(clock_dt) = clock_buf.clock_correction(sv) {
-                                candidate.set_clock_correction(clock_dt);
+                            if let Some(corr) = eph_buffer.clock_correction(t_gpst, sv) {
+                                candidate.set_clock_correction(corr);
                             }
                         } else {
                             let observation =
@@ -220,8 +219,8 @@ impl Ublox {
 
                             let mut cd = Candidate::new(sv, t_gpst, vec![observation]);
 
-                            if let Some(clock_dt) = clock_buf.clock_correction(sv) {
-                                cd.set_clock_correction(clock_dt);
+                            if let Some(corr) = eph_buffer.clock_correction(t_gpst, sv) {
+                                cd.set_clock_correction(corr);
                             }
 
                             candidates.push(cd);
@@ -334,7 +333,6 @@ impl Ublox {
 
             for eph in eph_buffer.buffer.iter_mut() {
                 if eph.is_ready() {
-                    debug!("({}) orbital update", eph.sv);
                     if let Some(keplerian) = eph.to_kepler() {
                         match self.tx.send(Message::Kepler(keplerian)).await {
                             Ok(_) => {},
@@ -343,14 +341,6 @@ impl Ublox {
                             },
                         }
                     }
-                    eph.reset();
-                }
-
-                if let Some(eph1) = &eph.frame1 {
-                    clock_buf.latch(SvClock {
-                        sv: eph.sv,
-                        af0: eph1.af0,
-                    });
                 }
             }
         }

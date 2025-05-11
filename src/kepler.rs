@@ -20,9 +20,6 @@ pub struct SVKepler {
     crs: f64,
     cic: f64,
     cis: f64,
-    af0: f64,
-    af1: f64,
-    af2: f64,
     toc: Epoch,
     toe: Epoch,
     i_dot: f64,
@@ -64,9 +61,6 @@ impl SVKepler {
                 let toe_nanos = (frame2.toe as u64) * 1_000_000_000;
                 Epoch::from_time_of_week(frame1.week as u32, toe_nanos, TimeScale::GPST)
             },
-            af0: frame1.af0,
-            af1: frame1.af1,
-            af2: frame1.af2,
         }
     }
 }
@@ -103,11 +97,14 @@ impl OrbitSource for KeplerBuffer {
         let a_ref = 26559710.0_f64; // almanach
         let f = -2.0 * gm_m3_s2.sqrt() / SPEED_OF_LIGHT_M_S / SPEED_OF_LIGHT_M_S;
         let (toc, toe) = (sv_data.toc, sv_data.toe);
+
         let (e, e_2, e_3) = (sv_data.e, sv_data.e.powi(2), sv_data.e.powi(3));
         let (a, sqrt_a, a_3) = (sv_data.a, sv_data.a.sqrt(), sv_data.a.powi(3));
+
         let (cus, cuc) = (sv_data.cus, sv_data.cuc);
         let (cis, cic) = (sv_data.cis, sv_data.cic);
         let (crs, crc) = (sv_data.crs, sv_data.crc);
+
         let (i0, idot) = (sv_data.i0, sv_data.i_dot);
         let (omega0, omega_dot) = (sv_data.omega0, sv_data.omega_dot);
 
@@ -152,6 +149,9 @@ impl OrbitSource for KeplerBuffer {
         let z = y_orb + sin_i;
 
         let (x_km, y_km, z_km) = (x / 1000.0, y / 1000.0, z / 1000.0);
-        Some(Orbit::from_position(x_km, y_km, z_km, epoch, frame))
+
+        debug!("{}({}) x={}km y={}km z={}km", t_gpst, sv, x_km, y_km, z_km);
+
+        Some(Orbit::from_position(x_km, y_km, z_km, t_gpst, frame))
     }
 }

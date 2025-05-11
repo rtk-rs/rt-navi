@@ -1,11 +1,11 @@
 use std::{
-    io::{Error, ErrorKind as IoErrorKind, Result as IoResult},
+    io::{ErrorKind as IoErrorKind, Result as IoResult},
     time::{Duration, SystemTime},
 };
 
 use serialport::SerialPort;
 
-use ublox::{CfgPrtUart, CfgPrtUartBuilder, PacketRef, Parser, UartMode, UbxPacketMeta};
+use ublox::{PacketRef, Parser, UbxPacketMeta};
 
 pub trait UbxPacketHandler {
     fn handle(&mut self, _packet: PacketRef<'_>) {}
