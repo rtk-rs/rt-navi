@@ -3,7 +3,9 @@ use std::cell::RefCell;
 
 use ublox::{GpsEphFrame1, GpsEphFrame2, GpsEphFrame3};
 
-use gnss_rtk::prelude::{Epoch, Frame, Orbit, OrbitSource, TimeScale, SV};
+use gnss_rtk::prelude::{
+    Constellation, Epoch, Frame, Orbit, OrbitSource, TimeScale, SPEED_OF_LIGHT_M_S, SV,
+};
 
 #[derive(Debug, Copy, Clone)]
 pub struct SVKepler {
@@ -18,13 +20,16 @@ pub struct SVKepler {
     crs: f64,
     cic: f64,
     cis: f64,
+    af0: f64,
+    af1: f64,
+    af2: f64,
+    toc: Epoch,
+    toe: Epoch,
     i_dot: f64,
     delta_n: f64,
     omega: f64,
     omega0: f64,
     omega_dot: f64,
-    toc: u32,
-    toe: u32,
 }
 
 impl SVKepler {
@@ -51,8 +56,17 @@ impl SVKepler {
             omega: frame3.omega,
             omega0: frame3.omega0,
             omega_dot: frame3.omega_dot,
-            toc: frame1.toc,
-            toe: frame2.toe,
+            toc: {
+                let toc_nanos = (frame1.toc as u64) * 1_000_000_000;
+                Epoch::from_time_of_week(frame1.week as u32, toc_nanos, TimeScale::GPST)
+            },
+            toe: {
+                let toe_nanos = (frame2.toe as u64) * 1_000_000_000;
+                Epoch::from_time_of_week(frame1.week as u32, toe_nanos, TimeScale::GPST)
+            },
+            af0: frame1.af0,
+            af1: frame1.af1,
+            af2: frame1.af2,
         }
     }
 }
@@ -81,118 +95,63 @@ impl OrbitSource for KeplerBuffer {
         let buffer = self.buffer.borrow();
         let sv_data = buffer.iter().find(|buf| buf.sv == sv)?;
 
-        let gm_m3_s2 = 0.0_f64; // Constants::gm(sv);
-        let omega = 0.0_f64; // Constants::omega(sv);
-        let dtr_f = 0.0_f64; // Constants::dtr_f(sv);
+        // constants
+        let gm_m3_s2 = 3.986005_f64 * 10.0_f64.powi(14);
+        let omega_earth = 7.2921151467_f64.powi(-5);
 
+        // values
+        let a_ref = 26559710.0_f64; // almanach
+        let f = -2.0 * gm_m3_s2.sqrt() / SPEED_OF_LIGHT_M_S / SPEED_OF_LIGHT_M_S;
+        let (toc, toe) = (sv_data.toc, sv_data.toe);
+        let (e, e_2, e_3) = (sv_data.e, sv_data.e.powi(2), sv_data.e.powi(3));
+        let (a, sqrt_a, a_3) = (sv_data.a, sv_data.a.sqrt(), sv_data.a.powi(3));
+        let (cus, cuc) = (sv_data.cus, sv_data.cuc);
+        let (cis, cic) = (sv_data.cis, sv_data.cic);
+        let (crs, crc) = (sv_data.crs, sv_data.crc);
+        let (i0, idot) = (sv_data.i0, sv_data.i_dot);
+        let (omega0, omega_dot) = (sv_data.omega0, sv_data.omega_dot);
+
+        let toe_nanos = sv_data.toe.to_time_of_week().1;
+        let toe_s = (toe_nanos as f64) * 1.0E-9;
+
+        // dt
         let t_gpst = epoch.to_time_scale(TimeScale::GPST);
-        let (_, t_gpst) = t_gpst.to_time_of_week();
+        let toe_gpst = sv_data.toe.to_time_scale(TimeScale::GPST);
+        let t_k = (t_gpst - toe_gpst).to_seconds();
 
-        let toe = sv_data.toe as f64;
-        let t_k = t_gpst as f64 - toe;
+        let n0 = (gm_m3_s2 / a_3).sqrt();
+        let n = n0 + sv_data.delta_n;
+        let m = sv_data.m0 + n * t_k;
 
-        let n0 = (gm_m3_s2 / sv_data.a.powi(3)).sqrt(); // average angular vel
-        let n = n0 + sv_data.delta_n; // corrected mean angular vel
-        let m_k = sv_data.m0 + n * t_k; // average anomaly
+        let e0 = m;
+        let mut e_k = e0;
 
-        let mut e_k;
-        let mut i = 0;
-        let mut e_k_lst = 0.0_f64;
-
-        loop {
-            i += 1;
-            e_k = m_k + sv_data.e * e_k_lst.sin();
-
-            if (e_k - e_k_lst).abs() < 1e-10 {
-                break;
-            }
-
-            if i > 10 {
-                break; //ERROR
-            }
-
-            e_k_lst = e_k;
+        for _ in 0..10 {
+            e_k = m + e * e_k.sin();
         }
 
-        if i == 11 {
-            return None; //ERROR
-        }
-
-        // true anomaly
         let (sin_e_k, cos_e_k) = e_k.sin_cos();
-        let v_k = ((1.0 - sv_data.e.powi(2)).sqrt() * sin_e_k).atan2(cos_e_k - sv_data.e);
+        let v_k = ((1.0 - e_2).sqrt() * sin_e_k).atan2(cos_e_k - e);
 
-        let phi_k = v_k + sv_data.omega; // latitude argument
-        let (x2_sin_phi_k, x2_cos_phi_k) = (2.0 * phi_k).sin_cos();
+        let phi = sv_data.omega + v_k;
+        let (sin_2phi, cos_2phi) = (2.0 * phi).sin_cos();
 
-        // latitude argument correction
-        let du_k = sv_data.cus * x2_sin_phi_k + sv_data.cuc * x2_cos_phi_k;
-        let u_k = phi_k + du_k;
+        let u = phi + cus * sin_2phi + cuc * cos_2phi;
+        let dr = crs * sin_2phi + crc * cos_2phi;
+        let r = a * (1.0 - e * cos_e_k) + dr;
+        let i = i0 + idot * t_k + cis * sin_2phi + cic * cos_2phi;
 
-        // orbital radius correction
-        let dr_k = sv_data.crs * x2_sin_phi_k + sv_data.crc * x2_cos_phi_k;
-        let r_k = sv_data.a * (1.0 - sv_data.e * e_k.cos()) + dr_k;
+        let (x_orb, y_orb) = (r * u.cos(), r * u.sin());
+        let omega = omega0 + (omega_dot - omega_earth) * t_k - omega_earth * toe_s;
 
-        // inclination angle correction
-        let di_k = sv_data.cis * x2_sin_phi_k + sv_data.cic * x2_cos_phi_k;
+        let (sin_i, cos_i) = i.sin_cos();
+        let (sin_omega, cos_omega) = omega.sin_cos();
 
-        // first derivatives
-        let fd_omega_k = sv_data.omega_dot - omega;
+        let x = x_orb * cos_omega - y_orb * cos_i * sin_omega;
+        let y = x_orb * sin_omega - y_orb * cos_i * cos_omega;
+        let z = y_orb + sin_i;
 
-        let fd_e_k = n / (1.0 - sv_data.e * e_k.cos());
-
-        let fd_phi_k = ((1.0 + sv_data.e) / (1.0 - sv_data.e)).sqrt()
-            * ((v_k / 2.0).cos() / (e_k / 2.0).cos()).powi(2)
-            * fd_e_k;
-
-        let fd_u_k =
-            (sv_data.cus * x2_cos_phi_k - sv_data.cuc * x2_sin_phi_k) * fd_phi_k * 2.0 + fd_phi_k;
-
-        let fd_r_k = sv_data.a * sv_data.e * e_k.sin() * fd_e_k
-            + 2.0 * (sv_data.crs * x2_cos_phi_k - sv_data.crc * x2_sin_phi_k) * fd_phi_k;
-
-        let fd_i_k = sv_data.i_dot
-            + 2.0 * (sv_data.cis * x2_cos_phi_k - sv_data.crc * x2_sin_phi_k) * fd_phi_k;
-
-        // relativistic effect correction
-        let dtr = dtr_f * sv_data.e * sv_data.a.sqrt() * e_k.sin();
-        let fd_dtr = dtr_f * sv_data.e * sv_data.a.sqrt() * e_k.cos() * fd_e_k;
-
-        // ascending node longitude correction (RAAN)
-        let omega_k = if sv.is_beidou_geo() {
-            sv_data.omega0 + sv_data.omega_dot * t_k - omega * toe
-        } else {
-            // GPS, Galileo, BeiDou_meo
-            (sv_data.omega0 + sv_data.omega_dot - omega) * t_k - omega * toe
-        };
-
-        // corrected inclination angle
-        let i_k = sv_data.i0 + di_k + sv_data.i_dot * t_k;
-
-        match Orbit::try_keplerian(
-            sv_data.a.sqrt() * 1e-3,
-            sv_data.e,
-            i_k.to_degrees(),
-            sv_data.omega_dot.to_degrees(),
-            sv_data.omega.to_degrees(),
-            v_k.to_degrees(),
-            epoch,
-            frame.with_mu_km3_s2(gm_m3_s2 * 1e-9),
-        ) {
-            Ok(orbit) => {
-                let posvel_km = orbit.to_cartesian_pos_vel();
-
-                debug!(
-                    "(anise) {}({}) x_km={}, y_km={} z_km={}",
-                    epoch, sv, posvel_km[0], posvel_km[1], posvel_km[2]
-                );
-
-                Some(orbit)
-            },
-            Err(e) => {
-                error!("(anise) kepler error: {}", e);
-                None
-            },
-        }
+        let (x_km, y_km, z_km) = (x / 1000.0, y / 1000.0, z / 1000.0);
+        Some(Orbit::from_position(x_km, y_km, z_km, epoch, frame))
     }
 }
