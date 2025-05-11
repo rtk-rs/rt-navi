@@ -18,25 +18,29 @@ readme = "README.md"
 
 [dependencies]
 log = "0.4"
-env_logger = "0.11"
-thiserror = "1"
+thiserror = "2"
+env_logger = "0.11.8"
 chrono = "0.4.29"
-ublox = "0.4.5"
-serialport = "4.2.2"
+nalgebra = "0.33"
 
-tokio = { version = "1.39.2", features = ["full"] }
+# ratatui = "0.29"
 
+serialport = "4.7"
+tokio = { version = "1.45.0", features = ["full"] }
+clap = { version = "4.5", features = ["derive", "color"] }
 
-clap = { version = "4.4.13", features = ["derive", "color"] }
+# ublox = { git = "https://github.com/ublox-rs/ublox", branch = "master" }
+ublox = { git = "https://github.com/ublox-rs/ublox", branch = "sfrbx-protos" }
+# ublox = { path = "../../ublox/ublox" }
 
-anise = { version = "0.4.2", features = ["embed_ephem"] }
-hifitime = { version = "4.0.0-alpha", features = ["serde", "std"] }
+rtcm-rs = "0.11"
 
-gnss-rs = { version = "2.2.1", features = ["serde"] }
+hifitime = { version = "4.0", features = ["serde", "std"] }
+anise = { git = "https://github.com/nyx-space/anise", branch = "dep/hifitime-github", features = ["embed_ephem"] }
 
-gnss-rtk = { version = "0.5.0", features = ["serde"] }
-# gnss-rtk = { path = "../../rtk-rs/gnss-rtk", features = ["serde"] }
-# gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "main", features = ["serde"] }
+gnss-rs = { version = "2.3.5", features = ["serde"] }
+# gnss-rtk = { path = "../gnss-rtk", features = ["serde"] }
+gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "improvements", features = ["serde"] }
 
-gpx = { version = "0.10", optional = true }
-kml = { version = "0.8", optional = true }
+# gpx = { version = "0.10", optional = true }
+# kml = { version = "0.8", optional = true }
