@@ -343,6 +343,7 @@ impl Ublox {
                             },
                         }
                     }
+                    eph.reset();
                 }
 
                 if let Some(eph1) = &eph.frame1 {

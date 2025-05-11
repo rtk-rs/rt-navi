@@ -6,12 +6,6 @@ pub struct SvClock {
     pub af0: f64,
 }
 
-impl SvClock {
-    pub fn new(sv: SV, af0: f64) -> Self {
-        Self { sv, af0 }
-    }
-}
-
 pub struct ClockBuffer {
     /// storage
     pub buffer: Vec<SvClock>,
@@ -25,8 +19,11 @@ impl ClockBuffer {
     }
 
     pub fn latch(&mut self, clock: SvClock) {
-        self.buffer.retain(|buf| buf.sv != clock.sv);
-        self.buffer.push(clock);
+        if let Some(sv_clk) = self.buffer.iter_mut().find(|buf| buf.sv == clock.sv) {
+            sv_clk.af0 = clock.af0;
+        } else {
+            self.buffer.push(clock);
+        }
     }
 
     pub fn clock_correction(&self, sv: SV) -> Option<ClockCorrection> {
