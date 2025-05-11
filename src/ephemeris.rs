@@ -41,7 +41,7 @@ impl GpsSvRawEphemeris {
         Some(SVKepler::from_gps(self.sv, frame1, frame2, frame3))
     }
 
-    fn week_number(t_gpst: Epoch, wn: u16) -> u32 {
+    pub fn week_number(t_gpst: Epoch, wn: u16) -> u32 {
         let current_week = t_gpst.to_time_of_week().0;
         let delta = current_week - wn as u32;
         let rollover = (delta as f64 / 1024.0).round() as u32;

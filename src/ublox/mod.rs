@@ -240,12 +240,12 @@ impl Ublox {
                         let pos: UbxPosition = (&sol).into();
                         let vel: UbxVelocity = (&sol).into();
 
-                        debug!(
+                        info!(
                             "ublox lat={:.6}° long={:.6}° alt={:.3}m",
                             pos.lat, pos.lon, pos.alt
                         );
 
-                        debug!("ublox vel={:.2}m/s heading={:.2}°", vel.speed, vel.heading);
+                        info!("ublox vel={:.2}m/s heading={:.2}°", vel.speed, vel.heading);
                     }
 
                     if has_time {
@@ -253,7 +253,7 @@ impl Ublox {
                             .try_into()
                             .expect("Could not parse NAV-PVT time field to UTC");
 
-                        debug!("ublox absolute time: {}", time);
+                        info!("ublox absolute time: {}", time);
                     }
                 },
 
@@ -279,7 +279,7 @@ impl Ublox {
                             if let Some(interprated) = sfrbx.interprete() {
                                 match interprated {
                                     RxmSfrbxInterpreted::GPS(gps) => {
-                                        trace!("UBX-SFRBX ({}) - {:?}", sv, gps);
+                                        debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
                                         eph_buffer.latch_gps_frame(sv, gps);
                                     },
                                 }

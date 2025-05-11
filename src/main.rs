@@ -75,7 +75,8 @@ async fn main() -> Result<(), Error> {
 
     let kepler_buf = Rc::new(KeplerBuffer::new());
 
-    let user_profile = User::default();
+    let mut user_profile = User::default();
+    user_profile.profile = None;
 
     let mut cfg = Config::static_preset(Method::SPP);
     cfg.min_sv_elev = None;
@@ -118,7 +119,7 @@ async fn main() -> Result<(), Error> {
                             let (lat, long, alt) = pvt.lat_long_alt_deg_deg_m;
 
                             info!("new solution | lat={:.6}° long={:.6} alt={:.6}m | dt={:.6E}s drift={:.6E}s/s", 
-                                lat, long, alt, pvt.clock_offset_s ,pvt.clock_drift_s_s);
+                                lat, long, alt, pvt.clock_offset_s, pvt.clock_drift_s_s);
                         },
                         Err(e) => {
                             error!("ppp error: {}", e);
