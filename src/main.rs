@@ -81,7 +81,7 @@ async fn main() -> Result<(), Error> {
     let mut cfg = Config::static_preset(Method::SPP);
     cfg.min_sv_elev = None;
 
-    debug!("deployed with {:#?} {:#?}", user_profile, cfg);
+    debug!("deployed with {} {:#?}", user_profile, cfg);
 
     let mut ppp = PPP::new_survey(
         almanac,
