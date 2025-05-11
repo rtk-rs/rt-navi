@@ -21,17 +21,19 @@ log = "0.4"
 thiserror = "2"
 env_logger = "0.11.8"
 chrono = "0.4.29"
+nalgebra = "0.33"
+
+# ratatui = "0.29"
 
 serialport = "4.7"
+tokio = { version = "1.45.0", features = ["full"] }
+clap = { version = "4.5", features = ["derive", "color"] }
 
 # ublox = { git = "https://github.com/ublox-rs/ublox", branch = "master" }
 ublox = { git = "https://github.com/ublox-rs/ublox", branch = "sfrbx-protos" }
-# ublox = { path = "../../ublox/ublox" }
+# ublox = { path = "../../ublox/ublox" }
 
 rtcm-rs = "0.11"
-
-tokio = { version = "1.45.0", features = ["full"] }
-clap = { version = "4.5", features = ["derive", "color"] }
 
 hifitime = { version = "4.0", features = ["serde", "std"] }
 anise = { git = "https://github.com/nyx-space/anise", branch = "dep/hifitime-github", features = ["embed_ephem"] }
