@@ -1,0 +1,38 @@
+name: Daily
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *" # midnight, every day
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build 
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        submodules: recursive
+        fetch-depth: 0
+    
+    - uses: actions-rs/toolchain@v1
+      name: Install Rust
+      with:
+        toolchain: 1.82.0
+        override: true
+    
+    - uses: actions-rs/cargo@v1
+      name: Build (default)
+      with:
+        command: build
+        args: -r
+    
+    - uses: actions-rs/cargo@v1
+      name: Build (all features)
+      with:
+        command: build
+        args: --all-features

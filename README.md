@@ -3,14 +3,15 @@ RT-NAVI
 
 [![rust](https://github.com/rtk-rs/rt-navi/actions/workflows/rust.yml/badge.svg)](https://github.com/rtk-rs/rt-navi/actions/workflows/rust.yml)
 [![crates.io](https://img.shields.io/crates/v/rt-navi.svg)](https://crates.io/crates/rt-navi)
-[![License](https://img.shields.io/badge/license-MPL-blue?style=flat-square)](https://github.com/rtk-rs/rt-navi/blob/main/LICENSE-MIT)
 [![crates.io](https://img.shields.io/crates/d/rt-navi.svg)](https://crates.io/crates/rt-navi)
 
+[![License](https://img.shields.io/badge/license-MPL_2.0-orange?style=for-the-badge&logo=mozilla)](https://github.com/rtk-rs/binex/blob/main/LICENSE)
+
 `rt-navi` is our real-time navigation application. It proposes interfaces to our 
-[GNSS-RTK solver](https://github.com/rtk-rs/gnss-rtk) and currently can operate with a Ublox,
+[GNSS-RTK solver](https://github.com/rtk-rs/gnss-rtk) and supports one U-Blox receiver,
 since Rust language offers great support for these devices.
 
-If support for other devices appear, it should be easy to propose an interface to them.
+If support for other devices appear, it should be easy to propose other interfaces.
 
 `rt-navi` expects a single serial interface and currently does not manage several receivers.
 
