@@ -1,4 +1,4 @@
-use crate::{cli::SerialPortOpts, clock::ClockBuffer, Error};
+use crate::{cli::SerialPortOpts, clock::ClockBuffer, ephemeris::EphemerisBuffer, Error};
 use chrono::prelude::*;
 use std::time::Duration as StdDuration;
 
@@ -7,9 +7,9 @@ use device::Device;
 
 use ublox::{
     cfg_val::CfgVal, AlignmentToReferenceTime, CfgLayerSet, CfgMsgAllPortsBuilder, CfgRate,
-    CfgRateBuilder, CfgValSetBuilder, GnssFixType, GpsFrame, MgaGloEph, MgaGpsEph, MonVer, NavPvt,
-    PacketRef as UbxPacketRef, Position as UbxPosition, RxmRawx, RxmSfrbx, RxmSfrbxInterprated,
-    UbxPacketRequest, Velocity as UbxVelocity,
+    CfgRateBuilder, CfgValSetBuilder, GnssFixType, MonVer, NavPvt, PacketRef as UbxPacketRef,
+    Position as UbxPosition, RxmRawx, RxmSfrbx, RxmSfrbxInterpreted, UbxPacketRequest,
+    Velocity as UbxVelocity,
 };
 
 use serialport::{
@@ -21,11 +21,11 @@ use tokio::sync::mpsc::Sender;
 
 use gnss_rtk::prelude::{Candidate, Carrier, Constellation, Epoch, Observation, TimeScale, SV};
 
-use crate::{clock::SvClock, kepler::SvKepler};
+use crate::{clock::SvClock, kepler::SVKepler};
 
 pub enum Message {
-    /// SV Kepler update
-    SvKepler(SvKepler),
+    /// Kepler update
+    Kepler(SVKepler),
 
     /// Proposal
     Proposal(Vec<Candidate>),
@@ -102,7 +102,7 @@ impl Ublox {
 
         self.device
             .write_all(
-                &CfgMsgAllPortsBuilder::set_rate_for::<RxmRawx>([0, 0, 0, 0, 0, 0])
+                &CfgMsgAllPortsBuilder::set_rate_for::<RxmRawx>([1, 1, 1, 1, 1, 1])
                     .into_packet_bytes(),
             )
             .unwrap_or_else(|e| panic!("Failed to activate RxmRawx msg: {}", e));
@@ -111,7 +111,7 @@ impl Ublox {
 
         self.device
             .write_all(
-                &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([0, 0, 0, 0, 0, 0])
+                &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([1, 1, 1, 1, 1, 1])
                     .into_packet_bytes(),
             )
             .unwrap_or_else(|e| panic!("Failed to activate NavPvt msg: {}", e));
@@ -169,7 +169,7 @@ impl Ublox {
     /// Main tasklet
     pub async fn tasklet(&mut self) {
         let mut clock_buf = ClockBuffer::new();
-        let mut sv_kepler = Vec::<SvKepler>::with_capacity(8);
+        let mut eph_buffer = EphemerisBuffer::new();
         let mut candidates = Vec::<Candidate>::with_capacity(8);
 
         loop {
@@ -267,25 +267,27 @@ impl Ublox {
                         Ok(Constellation::GPS) => {
                             let sv = SV::new(Constellation::GPS, sfrbx.sv_id());
 
-                            for (index, dword) in sfrbx.dwrd().enumerate() {
-                                debug!(
-                                    "UBX-SFRBX ({}) - dword #{} value={:08x}",
-                                    sv,
-                                    index,
-                                    dword,
-                                );
-                            }
+                            // // To debug unknown constellations
+                            // for (index, dword) in sfrbx.dwrd().enumerate() {
+                            //     debug!(
+                            //         "UBX-SFRBX ({}) - dword #{} value={:08x}",
+                            //         sv,
+                            //         index,
+                            //         dword,
+                            //     );
+                            // }
 
-                            if let Some(interprated) = sfrbx.interprate() {
+                            if let Some(interprated) = sfrbx.interprete() {
                                 match interprated {
-                                    RxmSfrbxInterprated::GPS(gps) => {
-                                        debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
+                                    RxmSfrbxInterpreted::GPS(gps) => {
+                                        trace!("UBX-SFRBX ({}) - {:?}", sv, gps);
+                                        eph_buffer.latch_gps_frame(sv, gps);
                                     },
                                 }
                             }
                         },
-                        Ok(constellation) => {
-                            // error!("{} is work in progress", constellation);
+                        Ok(_) => {
+                            // trace!("{} is not supported yet", constellation);
                         },
                         Err(e) => {
                             error!("non supported constellation: {}", e);
@@ -330,15 +332,25 @@ impl Ublox {
                 candidates.clear();
             }
 
-            for msg in sv_kepler.iter() {
-                match self.tx.send(Message::SvKepler(*msg)).await {
-                    Ok(_) => {},
-                    Err(e) => error!("Failed to update {} keplerian state: {}", msg.sv, e),
+            for eph in eph_buffer.buffer.iter_mut() {
+                if eph.is_ready() {
+                    debug!("({}) orbital update", eph.sv);
+                    if let Some(keplerian) = eph.to_kepler() {
+                        match self.tx.send(Message::Kepler(keplerian)).await {
+                            Ok(_) => {},
+                            Err(e) => {
+                                error!("Failed to update {} keplerian state: {}", eph.sv, e);
+                            },
+                        }
+                    }
                 }
-            }
 
-            if sv_kepler.len() > 0 {
-                sv_kepler.clear();
+                if let Some(eph1) = &eph.frame1 {
+                    clock_buf.latch(SvClock {
+                        sv: eph.sv,
+                        af0: eph1.af0,
+                    });
+                }
             }
         }
     }

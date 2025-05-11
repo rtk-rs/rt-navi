@@ -15,6 +15,7 @@
 mod bias;
 mod cli;
 mod clock;
+mod ephemeris;
 mod kepler;
 mod rtcm;
 mod time;
@@ -123,8 +124,8 @@ async fn main() -> Result<(), Error> {
                     }
                 },
 
-                Message::SvKepler(sv_kepler) => {
-                    kepler_buf.latch(sv_kepler);
+                Message::Kepler(keplerian) => {
+                    kepler_buf.latch(keplerian);
                 },
             }
         }

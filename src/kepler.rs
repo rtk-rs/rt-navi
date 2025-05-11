@@ -1,12 +1,12 @@
 use log::{debug, error};
 use std::cell::RefCell;
 
-use ublox::MgaGpsEphRef;
+use ublox::{GpsEphFrame1, GpsEphFrame2, GpsEphFrame3};
 
 use gnss_rtk::prelude::{Epoch, Frame, Orbit, OrbitSource, TimeScale, SV};
 
 #[derive(Debug, Copy, Clone)]
-pub struct SvKepler {
+pub struct SVKepler {
     pub sv: SV,
     a: f64,
     e: f64,
@@ -23,31 +23,36 @@ pub struct SvKepler {
     omega: f64,
     omega0: f64,
     omega_dot: f64,
-    toc: f64,
-    toe: f64,
+    toc: u32,
+    toe: u32,
 }
 
-impl SvKepler {
-    pub fn new(sv: SV, value: MgaGpsEphRef) -> Self {
+impl SVKepler {
+    pub fn from_gps(
+        sv: SV,
+        frame1: &GpsEphFrame1,
+        frame2: &GpsEphFrame2,
+        frame3: &GpsEphFrame3,
+    ) -> Self {
         Self {
             sv,
-            e: value.e(),
-            m0: value.m0(),
-            cuc: value.cuc(),
-            cus: value.cus(),
-            cic: value.cic(),
-            cis: value.cis(),
-            crc: value.crc(),
-            crs: value.crs(),
-            i0: value.i0(),
-            toc: value.toc(),
-            toe: value.toe(),
-            i_dot: value.idot(),
-            a: value.sqrt_a().powi(2),
-            delta_n: value.delta_n(),
-            omega: value.omega(),
-            omega0: value.omega(),
-            omega_dot: value.omega_dot(),
+            a: frame2.sqrt_a.powi(2),
+            e: frame2.e,
+            m0: frame2.m0,
+            i0: frame2.m0,
+            cuc: frame2.cuc,
+            cus: frame2.cus,
+            crc: frame3.crc,
+            crs: frame2.crs,
+            cic: frame3.cic,
+            cis: frame3.cis,
+            i_dot: frame3.idot,
+            delta_n: frame2.delta_n,
+            omega: frame3.omega,
+            omega0: frame3.omega0,
+            omega_dot: frame3.omega_dot,
+            toc: frame1.toc,
+            toe: frame2.toe,
         }
     }
 }
@@ -55,7 +60,7 @@ impl SvKepler {
 #[derive(Clone)]
 pub struct KeplerBuffer {
     /// storage
-    buffer: RefCell<Vec<SvKepler>>,
+    buffer: RefCell<Vec<SVKepler>>,
 }
 
 impl KeplerBuffer {
@@ -65,7 +70,7 @@ impl KeplerBuffer {
         }
     }
 
-    pub fn latch(&self, kepler: SvKepler) {
+    pub fn latch(&self, kepler: SVKepler) {
         self.buffer.borrow_mut().retain(|buf| buf.sv != kepler.sv);
         self.buffer.borrow_mut().push(kepler);
     }
@@ -82,7 +87,9 @@ impl OrbitSource for KeplerBuffer {
 
         let t_gpst = epoch.to_time_scale(TimeScale::GPST);
         let (_, t_gpst) = t_gpst.to_time_of_week();
-        let t_k = t_gpst as f64 - sv_data.toe;
+
+        let toe = sv_data.toe as f64;
+        let t_k = t_gpst as f64 - toe;
 
         let n0 = (gm_m3_s2 / sv_data.a.powi(3)).sqrt(); // average angular vel
         let n = n0 + sv_data.delta_n; // corrected mean angular vel
@@ -153,10 +160,10 @@ impl OrbitSource for KeplerBuffer {
 
         // ascending node longitude correction (RAAN)
         let omega_k = if sv.is_beidou_geo() {
-            sv_data.omega0 + sv_data.omega_dot * t_k - omega * sv_data.toe
+            sv_data.omega0 + sv_data.omega_dot * t_k - omega * toe
         } else {
             // GPS, Galileo, BeiDou_meo
-            (sv_data.omega0 + sv_data.omega_dot - omega) * t_k - omega * sv_data.toe
+            (sv_data.omega0 + sv_data.omega_dot - omega) * t_k - omega * toe
         };
 
         // corrected inclination angle
