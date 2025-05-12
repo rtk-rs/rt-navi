@@ -17,18 +17,14 @@ impl GpsSvRawEphemeris {
         if let Some(frame1) = &self.frame1 {
             if let Some(frame2) = &self.frame2 {
                 if let Some(frame3) = &self.frame3 {
-                    // TODO if (frame1.iodc as u8) == frame2.iode && frame2.iode == frame3.iode {
-                    if frame2.iode == frame3.iode {
+                    if (frame1.iodc as u8) == frame2.iode && frame2.iode == frame3.iode {
                         return true;
                     }
                 }
             }
         }
-        false
-    }
 
-    pub fn reset(&mut self) {
-        (self.frame1, self.frame2, self.frame3) = (None, None, None);
+        false
     }
 
     pub fn to_kepler(&self) -> Option<SVKepler> {
@@ -48,23 +44,20 @@ impl GpsSvRawEphemeris {
         wn as u32 + rollover * 1024
     }
 
+    fn toc_gpst(t_gpst: Epoch, frame1: &GpsEphFrame1) -> Epoch {
+        let toc_nanos = (frame1.toc as u64) * 1_000_000_000;
+        let week = Self::week_number(t_gpst, frame1.week);
+        Epoch::from_time_of_week(week, toc_nanos, TimeScale::GPST)
+    }
+
     pub fn clock_correction(&self, t: Epoch) -> Option<ClockCorrection> {
-        let (frame1, frame2, frame3) = (
-            self.frame1.as_ref()?,
-            self.frame2.as_ref()?,
-            self.frame3.as_ref()?,
-        );
+        let frame1 = self.frame1.as_ref()?;
+
+        let t_gpst = t.to_time_scale(TimeScale::GPST);
 
         let (a0, a1, a2) = (frame1.af0, frame1.af1, frame1.af2);
 
-        let toc_nanos = (frame1.toc as u64) * 1_000_000_000;
-
-        let t_gpst = t.to_time_scale(TimeScale::GPST);
-        let week = Self::week_number(t_gpst, frame1.week);
-
-        let toc_gpst = Epoch::from_time_of_week(week, toc_nanos, TimeScale::GPST);
-
-        let mut dt = (toc_gpst - t_gpst).to_seconds();
+        let mut dt = (Self::toc_gpst(t_gpst, frame1) - t_gpst).to_seconds();
 
         for _ in 0..10 {
             dt -= a0 + a1 * dt + a2 * dt.powi(2);
