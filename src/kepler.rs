@@ -3,7 +3,9 @@ use std::cell::RefCell;
 
 use ublox::{GpsEphFrame1, GpsEphFrame2, GpsEphFrame3};
 
-use gnss_rtk::prelude::{Epoch, Frame, Orbit, OrbitSource, TimeScale, SPEED_OF_LIGHT_M_S, SV};
+use gnss_rtk::prelude::{
+    Duration, Epoch, Frame, Orbit, OrbitSource, TimeScale, SPEED_OF_LIGHT_M_S, SV,
+};
 
 use crate::ephemeris::GpsSvRawEphemeris;
 
@@ -44,7 +46,7 @@ impl SVKepler {
             a: frame2.sqrt_a.powi(2),
             e: frame2.e,
             m0: frame2.m0,
-            i0: frame2.m0,
+            i0: frame3.i0,
             cuc: frame2.cuc,
             cus: frame2.cus,
             crc: frame3.crc,
