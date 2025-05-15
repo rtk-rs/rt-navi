@@ -82,7 +82,7 @@ async fn main() -> Result<(), Error> {
     let mut cfg = Config::static_preset(Method::SPP);
 
     cfg.min_sv_elev = None;
-    cfg.solver.max_gdop = 20.0;
+    cfg.solver.max_gdop = 1000.0;
 
     debug!("deployed with {} {:#?}", user_profile, cfg);
 

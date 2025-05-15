@@ -267,18 +267,31 @@ impl Ublox {
                             let sv = SV::new(Constellation::GPS, sfrbx.sv_id());
 
                             // // To debug unknown constellations
-                            // for (index, dword) in sfrbx.dwrd().enumerate() {
-                            //     debug!(
-                            //         "UBX-SFRBX ({}) - dword #{} value={:08x}",
-                            //         sv,
-                            //         index,
-                            //         dword,
-                            //     );
-                            // }
+                            for (index, dword) in sfrbx.dwrd().enumerate() {
+                                debug!(
+                                    "UBX-SFRBX ({}) - dword #{} value=0x{:08x}",
+                                    sv, index, dword,
+                                );
+
+                                if index == 1 {
+                                    debug!(
+                                        "UBX-SFRBX ({}) frame_id=0x{:08x}",
+                                        sv,
+                                        ((dword & 0xffffff00) >> 8) & 0x7
+                                    );
+                                } else if index == 9 {
+                                    debug!(
+                                        "UBX-SFRBX ({}) toe={:08}",
+                                        sv,
+                                        (((dword >> 8) & 0x03fffc0) >> 6) * 16
+                                    );
+                                }
+                            }
+                            debug!("\n");
 
                             if let Some(interprated) = sfrbx.interprete() {
                                 match interprated {
-                                    RxmSfrbxInterpreted::GPS(gps) => {
+                                    RxmSfrbxInterpreted::GpsQzss(gps) => {
                                         debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
                                         eph_buffer.latch_gps_frame(sv, gps);
                                     },

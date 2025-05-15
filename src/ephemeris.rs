@@ -1,15 +1,18 @@
 use crate::kepler::SVKepler;
 
-use ublox::{GpsEphFrame1, GpsEphFrame2, GpsEphFrame3, GpsFrame, GpsSubframe};
+use ublox::{
+    RxmSfrbxGpsQzssFrame, RxmSfrbxGpsQzssFrame1, RxmSfrbxGpsQzssFrame2, RxmSfrbxGpsQzssFrame3,
+    RxmSfrbxGpsQzssSubframe,
+};
 
 use gnss_rtk::prelude::{ClockCorrection, Duration, Epoch, TimeScale, SV};
 
 #[derive(Debug, Default, Clone)]
 pub struct GpsSvRawEphemeris {
     pub sv: SV,
-    pub frame1: Option<GpsEphFrame1>,
-    pub frame2: Option<GpsEphFrame2>,
-    pub frame3: Option<GpsEphFrame3>,
+    pub frame1: Option<RxmSfrbxGpsQzssFrame1>,
+    pub frame2: Option<RxmSfrbxGpsQzssFrame2>,
+    pub frame3: Option<RxmSfrbxGpsQzssFrame3>,
 }
 
 impl GpsSvRawEphemeris {
@@ -44,8 +47,8 @@ impl GpsSvRawEphemeris {
         wn as u32 + rollover * 1024
     }
 
-    fn toc_gpst(t_gpst: Epoch, frame1: &GpsEphFrame1) -> Epoch {
-        let toc_nanos = (frame1.toc as u64) * 1_000_000_000;
+    fn toc_gpst(t_gpst: Epoch, frame1: &RxmSfrbxGpsQzssFrame1) -> Epoch {
+        let toc_nanos = (frame1.toc_s as u64) * 1_000_000_000;
         let week = Self::week_number(t_gpst, frame1.week);
         Epoch::from_time_of_week(week, toc_nanos, TimeScale::GPST)
     }
@@ -55,7 +58,7 @@ impl GpsSvRawEphemeris {
 
         let t_gpst = t.to_time_scale(TimeScale::GPST);
 
-        let (a0, a1, a2) = (frame1.af0, frame1.af1, frame1.af2);
+        let (a0, a1, a2) = (frame1.af0_s, frame1.af1_s_s, frame1.af2_s_s2);
 
         let mut dt = (Self::toc_gpst(t_gpst, frame1) - t_gpst).to_seconds();
 
@@ -80,16 +83,16 @@ impl EphemerisBuffer {
         }
     }
 
-    pub fn latch_gps_frame(&mut self, sv: SV, frame: GpsFrame) {
+    pub fn latch_gps_frame(&mut self, sv: SV, frame: RxmSfrbxGpsQzssFrame) {
         if let Some(gps_sv) = self.buffer.iter_mut().find(|buf| buf.sv == sv) {
             match frame.subframe {
-                GpsSubframe::Eph1(eph1) => {
+                RxmSfrbxGpsQzssSubframe::Eph1(eph1) => {
                     gps_sv.frame1 = Some(eph1);
                 },
-                GpsSubframe::Eph2(eph2) => {
+                RxmSfrbxGpsQzssSubframe::Eph2(eph2) => {
                     gps_sv.frame2 = Some(eph2);
                 },
-                GpsSubframe::Eph3(eph3) => {
+                RxmSfrbxGpsQzssSubframe::Eph3(eph3) => {
                     gps_sv.frame3 = Some(eph3);
                 },
             }

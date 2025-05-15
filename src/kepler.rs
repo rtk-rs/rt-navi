@@ -1,7 +1,7 @@
 use log::debug;
 use std::cell::RefCell;
 
-use ublox::{GpsEphFrame1, GpsEphFrame2, GpsEphFrame3};
+use ublox::{RxmSfrbxGpsQzssFrame1, RxmSfrbxGpsQzssFrame2, RxmSfrbxGpsQzssFrame3};
 
 use gnss_rtk::prelude::{
     Duration, Epoch, Frame, Orbit, OrbitSource, TimeScale, SPEED_OF_LIGHT_M_S, SV,
@@ -37,36 +37,37 @@ pub struct SVKepler {
 impl SVKepler {
     pub fn from_gps(
         sv: SV,
-        frame1: &GpsEphFrame1,
-        frame2: &GpsEphFrame2,
-        frame3: &GpsEphFrame3,
+        frame1: &RxmSfrbxGpsQzssFrame1,
+        frame2: &RxmSfrbxGpsQzssFrame2,
+        frame3: &RxmSfrbxGpsQzssFrame3,
     ) -> Self {
         Self {
             sv,
             a: frame2.sqrt_a.powi(2),
             e: frame2.e,
-            m0: frame2.m0,
-            i0: frame3.i0,
+            m0: frame2.m0_rad,
+            i0: frame3.i0_rad,
             cuc: frame2.cuc,
             cus: frame2.cus,
             crc: frame3.crc,
             crs: frame2.crs,
             cic: frame3.cic,
             cis: frame3.cis,
-            i_dot: frame3.idot,
+            i_dot: frame3.idot_rad_s,
             week: frame1.week,
-            toc: frame1.toc,
-            toe: frame2.toe,
-            delta_n: frame2.delta_n,
-            omega: frame3.omega,
-            omega0: frame3.omega0,
-            omega_dot: frame3.omega_dot,
+            toc: frame1.toc_s,
+            toe: frame2.toe_s,
+            delta_n: frame2.dn_rad,
+            omega: frame3.omega_rad,
+            omega0: frame3.omega0_rad,
+            omega_dot: frame3.omega_dot_rad_s,
         }
     }
 
     pub fn toe_gpst(&self, t_gpst: Epoch) -> Epoch {
         let toe_wn = GpsSvRawEphemeris::week_number(t_gpst, self.week);
         let toe_nanos = (self.toe as u64) * 1_000_000_000;
+        debug!("TOE: w_n={} =={}, toe_s={}", self.week, toe_wn, self.toe);
         Epoch::from_time_of_week(toe_wn, toe_nanos, TimeScale::GPST)
     }
 }
@@ -92,6 +93,8 @@ impl KeplerBuffer {
 
 impl OrbitSource for KeplerBuffer {
     fn next_at(&self, epoch: Epoch, sv: SV, frame: Frame) -> Option<Orbit> {
+        debug!("{} request @ {}", sv, epoch);
+
         let buffer = self.buffer.borrow();
         let sv_data = buffer.iter().find(|buf| buf.sv == sv)?;
 
@@ -100,11 +103,11 @@ impl OrbitSource for KeplerBuffer {
         const OMEGA_EARTH: f64 = 7.2921151467E-5;
 
         // values
-        let a_ref = 26559710.0_f64; // almanach
-        let f = -2.0 * GM_M3_S2.sqrt() / SPEED_OF_LIGHT_M_S / SPEED_OF_LIGHT_M_S;
+        // let a_ref = 26559710.0_f64; // almanach
+        // let f = -2.0 * GM_M3_S2.sqrt() / SPEED_OF_LIGHT_M_S / SPEED_OF_LIGHT_M_S;
 
-        let (e, e_2, e_3) = (sv_data.e, sv_data.e.powi(2), sv_data.e.powi(3));
-        let (a, sqrt_a, a_3) = (sv_data.a, sv_data.a.sqrt(), sv_data.a.powi(3));
+        let (e, e_2) = (sv_data.e, sv_data.e.powi(2));
+        let (a, a_3) = (sv_data.a, sv_data.a.powi(3));
 
         let (cus, cuc) = (sv_data.cus, sv_data.cuc);
         let (cis, cic) = (sv_data.cis, sv_data.cic);
@@ -115,10 +118,13 @@ impl OrbitSource for KeplerBuffer {
 
         let t_gpst = epoch.to_time_scale(TimeScale::GPST);
         let toe_gpst = sv_data.toe_gpst(t_gpst);
-        let toe_s = sv_data.toe as f64; // TODO wrapping  ?
+        // let toe_gpst = toe_gpst - Duration::from_hours(2.0);
+
+        let toe_s = sv_data.toe as f64;
         debug!("{}({}) - toe={}", t_gpst, sv, toe_gpst);
 
-        let mut t_k = (t_gpst - toe_gpst).to_seconds();
+        let t_tow_s = (t_gpst.to_time_of_week().1 / 1_000_000_000) as u32;
+        let mut t_k = (t_tow_s as i32 - sv_data.toe as i32) as f64;
 
         if t_k > 302400.0 {
             t_k -= 604800.0;
@@ -133,7 +139,7 @@ impl OrbitSource for KeplerBuffer {
         let mut e_k = 0.0_f64;
         let mut e_k_lst = 0.0_f64;
 
-        for _ in 0..10 {
+        for _ in 0..30 {
             e_k = m + e * e_k_lst.sin();
             e_k_lst = e_k;
         }
@@ -163,22 +169,22 @@ impl OrbitSource for KeplerBuffer {
         let y = x_orb * sin_omega - y_orb * cos_i * cos_omega;
         let z = 0.0;
 
-        // let z = y_orb * sin_omega;
-        // let (x_km, y_km, z_km) = (x * 1.0E-3, y * 1.0E-3, z * 1.0E-3);
+        let z = y_orb * sin_omega;
+        let (x_km, y_km, z_km) = (x * 1.0E-3, y * 1.0E-3, z * 1.0E-3);
 
-        // MEO orbit to ECEF rotation matrix
-        let rotation_x = Rotation3::from_axis_angle(&Vector3::x_axis(), i);
-        let rotation_z = Rotation3::from_axis_angle(&Vector3::z_axis(), omega);
-        let rot3 = rotation_z * rotation_x;
+        // // MEO orbit to ECEF rotation matrix
+        // let rotation_x = Rotation3::from_axis_angle(&Vector3::x_axis(), i);
+        // let rotation_z = Rotation3::from_axis_angle(&Vector3::z_axis(), omega);
+        // let rot3 = rotation_z * rotation_x;
 
-        let orbit_xyz = Vector3::new(x, y, z);
-        let ecef_xyz = rot3 * orbit_xyz;
+        // let orbit_xyz = Vector3::new(x, y, z);
+        // let ecef_xyz = rot3 * orbit_xyz;
 
-        let (x_km, y_km, z_km) = (
-            ecef_xyz[0] / 1000.0,
-            ecef_xyz[1] / 1000.0,
-            ecef_xyz[2] / 1000.0,
-        );
+        // let (x_km, y_km, z_km) = (
+        //     ecef_xyz[0] / 1000.0,
+        //     ecef_xyz[1] / 1000.0,
+        //     ecef_xyz[2] / 1000.0,
+        // );
 
         debug!(
             "{}({}) a={}m tk={}s n={}rad/s m={}rad e={} e_k={}rad r={} i={}",
