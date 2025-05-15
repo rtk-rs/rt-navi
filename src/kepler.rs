@@ -7,7 +7,7 @@ use gnss_rtk::prelude::{
     Duration, Epoch, Frame, Orbit, OrbitSource, TimeScale, SPEED_OF_LIGHT_M_S, SV,
 };
 
-use crate::ephemeris::GpsSvRawEphemeris;
+use crate::ephemeris::GpsSvEphemeris;
 
 use nalgebra::{Rotation3, Vector3};
 
@@ -24,26 +24,32 @@ pub struct SVKepler {
     crs: f64,
     cic: f64,
     cis: f64,
-    toc: u32,
-    toe: u32,
     i_dot: f64,
     delta_n: f64,
     week: u16,
     omega: f64,
     omega0: f64,
     omega_dot: f64,
+    toc_gpst: Epoch,
+    toe_gpst: Epoch,
+    toe_s: f64,
 }
 
 impl SVKepler {
     pub fn from_gps(
         sv: SV,
+        toe_s: f64,
+        toc_gpst: Epoch,
+        toe_gpst: Epoch,
         frame1: &RxmSfrbxGpsQzssFrame1,
         frame2: &RxmSfrbxGpsQzssFrame2,
         frame3: &RxmSfrbxGpsQzssFrame3,
     ) -> Self {
         Self {
             sv,
-            a: frame2.sqrt_a.powi(2),
+            toe_s,
+            toc_gpst,
+            toe_gpst,
             e: frame2.e,
             m0: frame2.m0_rad,
             i0: frame3.i0_rad,
@@ -53,22 +59,14 @@ impl SVKepler {
             crs: frame2.crs,
             cic: frame3.cic,
             cis: frame3.cis,
-            i_dot: frame3.idot_rad_s,
             week: frame1.week,
-            toc: frame1.toc_s,
-            toe: frame2.toe_s,
             delta_n: frame2.dn_rad,
             omega: frame3.omega_rad,
+            a: frame2.sqrt_a.powi(2),
+            i_dot: frame3.idot_rad_s,
             omega0: frame3.omega0_rad,
             omega_dot: frame3.omega_dot_rad_s,
         }
-    }
-
-    pub fn toe_gpst(&self, t_gpst: Epoch) -> Epoch {
-        let toe_wn = GpsSvRawEphemeris::week_number(t_gpst, self.week);
-        let toe_nanos = (self.toe as u64) * 1_000_000_000;
-        debug!("TOE: w_n={} =={}, toe_s={}", self.week, toe_wn, self.toe);
-        Epoch::from_time_of_week(toe_wn, toe_nanos, TimeScale::GPST)
     }
 }
 
@@ -102,10 +100,6 @@ impl OrbitSource for KeplerBuffer {
         const GM_M3_S2: f64 = 3.9860050E14;
         const OMEGA_EARTH: f64 = 7.2921151467E-5;
 
-        // values
-        // let a_ref = 26559710.0_f64; // almanach
-        // let f = -2.0 * GM_M3_S2.sqrt() / SPEED_OF_LIGHT_M_S / SPEED_OF_LIGHT_M_S;
-
         let (e, e_2) = (sv_data.e, sv_data.e.powi(2));
         let (a, a_3) = (sv_data.a, sv_data.a.powi(3));
 
@@ -117,20 +111,9 @@ impl OrbitSource for KeplerBuffer {
         let (omega0, omega_dot) = (sv_data.omega0, sv_data.omega_dot);
 
         let t_gpst = epoch.to_time_scale(TimeScale::GPST);
-        let toe_gpst = sv_data.toe_gpst(t_gpst);
-        // let toe_gpst = toe_gpst - Duration::from_hours(2.0);
 
-        let toe_s = sv_data.toe as f64;
-        debug!("{}({}) - toe={}", t_gpst, sv, toe_gpst);
-
-        let t_tow_s = (t_gpst.to_time_of_week().1 / 1_000_000_000) as u32;
-        let mut t_k = (t_tow_s as i32 - sv_data.toe as i32) as f64;
-
-        if t_k > 302400.0 {
-            t_k -= 604800.0;
-        } else if t_k < -302400.0 {
-            t_k += 604800.0;
-        }
+        let t_k = (t_gpst - sv_data.toe_gpst).to_seconds();
+        debug!("{}({}) - toe={} t_k={}", t_gpst, sv, sv_data.toe_gpst, t_k);
 
         let n0 = (GM_M3_S2 / a_3).sqrt();
         let n = n0 + sv_data.delta_n;
@@ -139,7 +122,7 @@ impl OrbitSource for KeplerBuffer {
         let mut e_k = 0.0_f64;
         let mut e_k_lst = 0.0_f64;
 
-        for _ in 0..30 {
+        for _ in 0..10 {
             e_k = m + e * e_k_lst.sin();
             e_k_lst = e_k;
         }
@@ -160,7 +143,7 @@ impl OrbitSource for KeplerBuffer {
         let i = i0 + di + idot * t_k;
 
         let (x_orb, y_orb) = (r * u.cos(), r * u.sin());
-        let omega = omega0 + (omega_dot - OMEGA_EARTH) * t_k - OMEGA_EARTH * toe_s;
+        let omega = omega0 + (omega_dot - OMEGA_EARTH) * t_k - OMEGA_EARTH * sv_data.toe_s as f64;
 
         let (sin_i, cos_i) = i.sin_cos();
         let (sin_omega, cos_omega) = omega.sin_cos();

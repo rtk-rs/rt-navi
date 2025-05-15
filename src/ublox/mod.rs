@@ -168,6 +168,7 @@ impl Ublox {
 
     /// Main tasklet
     pub async fn tasklet(&mut self) {
+        let mut latest_t = Epoch::default();
         let mut eph_buffer = EphemerisBuffer::new();
         let mut candidates = Vec::<Candidate>::with_capacity(8);
 
@@ -186,6 +187,8 @@ impl Ublox {
                     let week = rawx.week() as u32;
                     let nanos = rawx.rcv_tow().round() as u64 * 1_000_000_000;
                     let t_gpst = Epoch::from_time_of_week(week, nanos, TimeScale::GPST);
+
+                    latest_t = t_gpst;
 
                     candidates.clear();
                     debug!("{} new measurements", t_gpst);
@@ -258,53 +261,50 @@ impl Ublox {
                 },
 
                 UbxPacketRef::RxmSfrbx(sfrbx) => {
-                    // TODO: only for glonass
-                    // let freq_id = sfrbx.freq_id();
-                    // debug!("UBX-SFRBX freq_id={}", freq_id);
-
                     match gnss_rtk_id(sfrbx.gnss_id()) {
-                        Ok(Constellation::GPS) => {
-                            let sv = SV::new(Constellation::GPS, sfrbx.sv_id());
+                        Ok(constellation) => {
+                            let sv = SV::new(constellation, sfrbx.sv_id());
+                            match constellation {
+                                Constellation::GPS | Constellation::QZSS => {
+                                    // // DEBUG
+                                    // for (index, dword) in sfrbx.dwrd().enumerate() {
 
-                            // // To debug unknown constellations
-                            for (index, dword) in sfrbx.dwrd().enumerate() {
-                                debug!(
-                                    "UBX-SFRBX ({}) - dword #{} value=0x{:08x}",
-                                    sv, index, dword,
-                                );
+                                    //     let dword = (dword & 0x3fffffc0) >> 6;
 
-                                if index == 1 {
-                                    debug!(
-                                        "UBX-SFRBX ({}) frame_id=0x{:08x}",
-                                        sv,
-                                        ((dword & 0xffffff00) >> 8) & 0x7
-                                    );
-                                } else if index == 9 {
-                                    debug!(
-                                        "UBX-SFRBX ({}) toe={:08}",
-                                        sv,
-                                        (((dword >> 8) & 0x03fffc0) >> 6) * 16
-                                    );
-                                }
+                                    //     debug!(
+                                    //         "UBX-SFRBX ({}) - dword #{} value=0x{:08x}",
+                                    //         sv, index, dword,
+                                    //     );
+
+                                    //     if index == 1 {
+                                    //         debug!(
+                                    //             "UBX-SFRBX ({}) frame_id=0x{:08x}",
+                                    //             sv,
+                                    //             ((dword >> 2) & 0x7)
+                                    //         );
+                                    //     }
+                                    // }
+                                    // debug!("\n");
+
+                                    if let Some(interprated) = sfrbx.interprete() {
+                                        match interprated {
+                                            RxmSfrbxInterpreted::GpsQzss(gps) => {
+                                                debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
+                                                eph_buffer.update(latest_t, sv, gps);
+                                            },
+                                        }
+                                    }
+                                },
+                                Constellation::Glonass => {
+                                    let _freq_id = sfrbx.freq_id();
+                                },
+                                _ => {},
                             }
-                            debug!("\n");
-
-                            if let Some(interprated) = sfrbx.interprete() {
-                                match interprated {
-                                    RxmSfrbxInterpreted::GpsQzss(gps) => {
-                                        debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
-                                        eph_buffer.latch_gps_frame(sv, gps);
-                                    },
-                                }
-                            }
                         },
-                        Ok(_) => {
-                            // trace!("{} is not supported yet", constellation);
+                        Err(_) => {
+                            // error!("Non supported constellation: #{}", sfrbx.gnss_id());
                         },
-                        Err(e) => {
-                            error!("non supported constellation: {}", e);
-                        },
-                    };
+                    }
                 },
 
                 UbxPacketRef::InfTest(msg) => {
@@ -345,14 +345,12 @@ impl Ublox {
             }
 
             for eph in eph_buffer.buffer.iter_mut() {
-                if eph.is_ready() {
-                    if let Some(keplerian) = eph.to_kepler() {
-                        match self.tx.send(Message::Kepler(keplerian)).await {
-                            Ok(_) => {},
-                            Err(e) => {
-                                error!("Failed to update {} keplerian state: {}", eph.sv, e);
-                            },
-                        }
+                if let Some(keplerian) = eph.to_kepler(latest_t) {
+                    match self.tx.send(Message::Kepler(keplerian)).await {
+                        Ok(_) => {},
+                        Err(e) => {
+                            error!("Failed to update {} keplerian state: {}", eph.sv, e);
+                        },
                     }
                 }
             }
