@@ -126,6 +126,7 @@ async fn main() -> Result<(), Error> {
                         },
                         Err(e) => {
                             error!("ppp error: {}", e);
+                            ppp.reset();
                         },
                     }
                 },

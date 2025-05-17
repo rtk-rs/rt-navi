@@ -19,7 +19,9 @@ use serialport::{
 
 use tokio::sync::mpsc::Sender;
 
-use gnss_rtk::prelude::{Candidate, Carrier, Constellation, Epoch, Observation, TimeScale, SV};
+use gnss_rtk::prelude::{
+    Candidate, Carrier, Constellation, Duration, Epoch, Observation, TimeScale, SV,
+};
 
 use crate::kepler::SVKepler;
 
@@ -210,15 +212,19 @@ impl Ublox {
 
                         if let Some(candidate) = candidates.iter_mut().find(|cd| cd.sv == sv) {
                             candidate.set_pseudo_range_m(carrier, meas.pr_mes());
-                            candidate.set_ambiguous_phase_range_m(carrier, meas.cp_mes());
+
+                            // In cycles !
+                            // candidate.set_ambiguous_phase_range_m(carrier, meas.cp_mes());
 
                             if let Some(corr) = eph_buffer.clock_correction(t_gpst, sv) {
                                 candidate.set_clock_correction(corr);
                             }
                         } else {
                             let observation =
-                                Observation::ambiguous_phase_range(carrier, meas.cp_mes(), None)
-                                    .with_pseudo_range_m(meas.pr_mes());
+                                Observation::pseudo_range(carrier, meas.pr_mes(), None);
+
+                            // In cycles !
+                            //         .with_ambiguous_phase_range_m(meas.cp_mes());
 
                             let mut cd = Candidate::new(sv, t_gpst, vec![observation]);
 
@@ -266,31 +272,30 @@ impl Ublox {
                             let sv = SV::new(constellation, sfrbx.sv_id());
                             match constellation {
                                 Constellation::GPS | Constellation::QZSS => {
-                                    // // DEBUG
-                                    // for (index, dword) in sfrbx.dwrd().enumerate() {
+                                    // DEBUG
+                                    for (index, dword) in sfrbx.dwrd().enumerate() {
+                                        // let dword = (dword & 0x3fffffc0) >> 6;
 
-                                    //     let dword = (dword & 0x3fffffc0) >> 6;
+                                        // debug!(
+                                        //     "UBX-SFRBX ({}) - dword #{} value=0x{:08x}",
+                                        //     sv, index, dword,
+                                        // );
 
-                                    //     debug!(
-                                    //         "UBX-SFRBX ({}) - dword #{} value=0x{:08x}",
-                                    //         sv, index, dword,
-                                    //     );
-
-                                    //     if index == 1 {
-                                    //         debug!(
-                                    //             "UBX-SFRBX ({}) frame_id=0x{:08x}",
-                                    //             sv,
-                                    //             ((dword >> 2) & 0x7)
-                                    //         );
-                                    //     }
-                                    // }
+                                        // if index == 1 {
+                                        //     debug!(
+                                        //         "UBX-SFRBX ({}) frame_id=0x{:08x}",
+                                        //         sv,
+                                        //         ((dword >> 2) & 0x7)
+                                        //     );
+                                        // }
+                                    }
                                     // debug!("\n");
 
                                     if let Some(interprated) = sfrbx.interprete() {
                                         match interprated {
                                             RxmSfrbxInterpreted::GpsQzss(gps) => {
                                                 debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
-                                                eph_buffer.update(latest_t, sv, gps);
+                                                eph_buffer.update(sv, gps);
                                             },
                                         }
                                     }
@@ -344,8 +349,10 @@ impl Ublox {
                 candidates.clear();
             }
 
-            for eph in eph_buffer.buffer.iter_mut() {
-                if let Some(keplerian) = eph.to_kepler(latest_t) {
+            for eph in eph_buffer.buffer.iter() {
+                if let Some(validated) = eph.validate() {
+                    let keplerian = validated.to_kepler(latest_t);
+
                     match self.tx.send(Message::Kepler(keplerian)).await {
                         Ok(_) => {},
                         Err(e) => {

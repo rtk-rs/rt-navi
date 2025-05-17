@@ -1,5 +1,6 @@
+use anise::math::Matrix3;
 use log::debug;
-use std::cell::RefCell;
+use std::{cell::RefCell, f64::consts::PI};
 
 use ublox::{RxmSfrbxGpsQzssFrame1, RxmSfrbxGpsQzssFrame2, RxmSfrbxGpsQzssFrame3};
 
@@ -51,8 +52,6 @@ impl SVKepler {
             toc_gpst,
             toe_gpst,
             e: frame2.e,
-            m0: frame2.m0_rad,
-            i0: frame3.i0_rad,
             cuc: frame2.cuc,
             cus: frame2.cus,
             crc: frame3.crc,
@@ -60,12 +59,14 @@ impl SVKepler {
             cic: frame3.cic,
             cis: frame3.cis,
             week: frame1.week,
-            delta_n: frame2.dn_rad,
-            omega: frame3.omega_rad,
+            m0: frame2.m0 * PI,
+            i0: frame3.i0 * PI,
+            i_dot: frame3.idot * PI,
+            delta_n: frame2.dn * PI,
             a: frame2.sqrt_a.powi(2),
-            i_dot: frame3.idot_rad_s,
-            omega0: frame3.omega0_rad,
-            omega_dot: frame3.omega_dot_rad_s,
+            omega: frame3.omega * PI,
+            omega0: frame3.omega0 * PI,
+            omega_dot: frame3.omega_dot * PI,
         }
     }
 }
@@ -97,7 +98,7 @@ impl OrbitSource for KeplerBuffer {
         let sv_data = buffer.iter().find(|buf| buf.sv == sv)?;
 
         // constants
-        const GM_M3_S2: f64 = 3.9860050E14;
+        const GM_M3_S2: f64 = 3.986004418E14;
         const OMEGA_EARTH: f64 = 7.2921151467E-5;
 
         let (e, e_2) = (sv_data.e, sv_data.e.powi(2));
@@ -108,7 +109,7 @@ impl OrbitSource for KeplerBuffer {
         let (crs, crc) = (sv_data.crs, sv_data.crc);
 
         let (i0, idot) = (sv_data.i0, sv_data.i_dot);
-        let (omega0, omega_dot) = (sv_data.omega0, sv_data.omega_dot);
+        let (omega0, omega, omega_dot) = (sv_data.omega0, sv_data.omega, sv_data.omega_dot);
 
         let t_gpst = epoch.to_time_scale(TimeScale::GPST);
 
@@ -122,56 +123,46 @@ impl OrbitSource for KeplerBuffer {
         let mut e_k = 0.0_f64;
         let mut e_k_lst = 0.0_f64;
 
-        for _ in 0..10 {
+        loop {
             e_k = m + e * e_k_lst.sin();
+            if (e_k - e_k_lst).abs() < 1e-10 {
+                break;
+            }
+
             e_k_lst = e_k;
         }
 
         let (sin_e_k, cos_e_k) = e_k.sin_cos();
         let v_k = ((1.0 - e_2).sqrt() * sin_e_k).atan2(cos_e_k - e);
+        let (sin_v_k, cos_v_k) = v_k.sin_cos();
 
-        let phi = v_k + sv_data.omega;
+        let phi = v_k + omega;
         let (sin_2phi, cos_2phi) = (2.0 * phi).sin_cos();
 
-        let du = cus * sin_2phi + cuc * cos_2phi;
-        let u = phi + du;
+        let u_k = phi + cuc * cos_2phi + cus * sin_2phi;
+        let r_k = a * (1.0 - e * cos_e_k) + crc * cos_2phi + crs * sin_2phi;
+        let i_k = i0 + idot * t_k + cic * cos_2phi + cis * sin_2phi;
+        let omega_k = omega0 + (omega_dot - OMEGA_EARTH) * t_k - OMEGA_EARTH * sv_data.toe_s;
 
-        let dr = crs * sin_2phi + crc * cos_2phi;
-        let r = a * (1.0 - e * cos_e_k) + dr;
+        let (x, y, z) = (r_k * u_k.cos(), r_k * u_k.sin(), 0.0);
 
-        let di = cis * sin_2phi + cic * cos_2phi;
-        let i = i0 + di + idot * t_k;
+        // MEO orbit to ECEF rotation matrix
+        let rot_x3 = Rotation3::from_axis_angle(&Vector3::x_axis(), i_k);
+        let rot_z3 = Rotation3::from_axis_angle(&Vector3::z_axis(), omega_k);
+        let rot3 = rot_z3 * rot_x3;
 
-        let (x_orb, y_orb) = (r * u.cos(), r * u.sin());
-        let omega = omega0 + (omega_dot - OMEGA_EARTH) * t_k - OMEGA_EARTH * sv_data.toe_s as f64;
+        let xyz_vec3 = Vector3::new(x, y, z);
+        let xyz_ecef = rot3 * xyz_vec3;
 
-        let (sin_i, cos_i) = i.sin_cos();
-        let (sin_omega, cos_omega) = omega.sin_cos();
-
-        let x = x_orb * cos_omega - y_orb * cos_i * sin_omega;
-        let y = x_orb * sin_omega - y_orb * cos_i * cos_omega;
-        let z = 0.0;
-
-        let z = y_orb * sin_omega;
-        let (x_km, y_km, z_km) = (x * 1.0E-3, y * 1.0E-3, z * 1.0E-3);
-
-        // // MEO orbit to ECEF rotation matrix
-        // let rotation_x = Rotation3::from_axis_angle(&Vector3::x_axis(), i);
-        // let rotation_z = Rotation3::from_axis_angle(&Vector3::z_axis(), omega);
-        // let rot3 = rotation_z * rotation_x;
-
-        // let orbit_xyz = Vector3::new(x, y, z);
-        // let ecef_xyz = rot3 * orbit_xyz;
-
-        // let (x_km, y_km, z_km) = (
-        //     ecef_xyz[0] / 1000.0,
-        //     ecef_xyz[1] / 1000.0,
-        //     ecef_xyz[2] / 1000.0,
-        // );
+        let (x_km, y_km, z_km) = (
+            xyz_ecef[0] / 1000.0,
+            xyz_ecef[1] / 1000.0,
+            xyz_ecef[2] / 1000.0,
+        );
 
         debug!(
             "{}({}) a={}m tk={}s n={}rad/s m={}rad e={} e_k={}rad r={} i={}",
-            t_gpst, sv, a, t_k, n, m, e, e_k, r, i
+            t_gpst, sv, a, t_k, n, m, e, e_k, r_k, i_k
         );
 
         debug!("{}({}) x={}km y={}km z={}km", t_gpst, sv, x_km, y_km, z_km);
