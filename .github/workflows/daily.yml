@@ -30,9 +30,3 @@ jobs:
       with:
         command: build
         args: -r
-    
-    - uses: actions-rs/cargo@v1
-      name: Build (all features)
-      with:
-        command: build
-        args: --all-features

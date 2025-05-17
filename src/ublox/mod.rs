@@ -19,7 +19,9 @@ use serialport::{
 
 use tokio::sync::mpsc::Sender;
 
-use gnss_rtk::prelude::{Candidate, Carrier, Constellation, Epoch, Observation, TimeScale, SV};
+use gnss_rtk::prelude::{
+    Candidate, Carrier, Constellation, Duration, Epoch, Observation, TimeScale, SV,
+};
 
 use crate::kepler::SVKepler;
 
@@ -168,6 +170,7 @@ impl Ublox {
 
     /// Main tasklet
     pub async fn tasklet(&mut self) {
+        let mut latest_t = Epoch::default();
         let mut eph_buffer = EphemerisBuffer::new();
         let mut candidates = Vec::<Candidate>::with_capacity(8);
 
@@ -186,6 +189,8 @@ impl Ublox {
                     let week = rawx.week() as u32;
                     let nanos = rawx.rcv_tow().round() as u64 * 1_000_000_000;
                     let t_gpst = Epoch::from_time_of_week(week, nanos, TimeScale::GPST);
+
+                    latest_t = t_gpst;
 
                     candidates.clear();
                     debug!("{} new measurements", t_gpst);
@@ -207,20 +212,32 @@ impl Ublox {
 
                         if let Some(candidate) = candidates.iter_mut().find(|cd| cd.sv == sv) {
                             candidate.set_pseudo_range_m(carrier, meas.pr_mes());
-                            candidate.set_ambiguous_phase_range_m(carrier, meas.cp_mes());
+
+                            // In cycles !
+                            // candidate.set_ambiguous_phase_range_m(carrier, meas.cp_mes());
 
                             if let Some(corr) = eph_buffer.clock_correction(t_gpst, sv) {
                                 candidate.set_clock_correction(corr);
                             }
+
+                            if let Some(tgd) = eph_buffer.tgd(sv) {
+                                candidate.set_group_delay(tgd);
+                            }
                         } else {
                             let observation =
-                                Observation::ambiguous_phase_range(carrier, meas.cp_mes(), None)
-                                    .with_pseudo_range_m(meas.pr_mes());
+                                Observation::pseudo_range(carrier, meas.pr_mes(), None);
+
+                            // In cycles !
+                            //         .with_ambiguous_phase_range_m(meas.cp_mes());
 
                             let mut cd = Candidate::new(sv, t_gpst, vec![observation]);
 
                             if let Some(corr) = eph_buffer.clock_correction(t_gpst, sv) {
                                 cd.set_clock_correction(corr);
+                            }
+
+                            if let Some(tgd) = eph_buffer.tgd(sv) {
+                                cd.set_group_delay(tgd);
                             }
 
                             candidates.push(cd);
@@ -258,40 +275,38 @@ impl Ublox {
                 },
 
                 UbxPacketRef::RxmSfrbx(sfrbx) => {
-                    // TODO: only for glonass
-                    // let freq_id = sfrbx.freq_id();
-                    // debug!("UBX-SFRBX freq_id={}", freq_id);
-
                     match gnss_rtk_id(sfrbx.gnss_id()) {
-                        Ok(Constellation::GPS) => {
-                            let sv = SV::new(Constellation::GPS, sfrbx.sv_id());
-
-                            // // To debug unknown constellations
-                            // for (index, dword) in sfrbx.dwrd().enumerate() {
-                            //     debug!(
-                            //         "UBX-SFRBX ({}) - dword #{} value={:08x}",
-                            //         sv,
-                            //         index,
-                            //         dword,
-                            //     );
-                            // }
-
-                            if let Some(interprated) = sfrbx.interprete() {
-                                match interprated {
-                                    RxmSfrbxInterpreted::GPS(gps) => {
-                                        debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
-                                        eph_buffer.latch_gps_frame(sv, gps);
-                                    },
-                                }
+                        Ok(constellation) => {
+                            let sv = SV::new(constellation, sfrbx.sv_id());
+                            match constellation {
+                                Constellation::GPS | Constellation::QZSS => {
+                                    // // DEBUG
+                                    // for (index, dword) in sfrbx.dwrd().enumerate() {
+                                    //     debug!(
+                                    //         "UBX-SFRBX ({}) - dword #{} value=0x{:08x}",
+                                    //         sv, index, dword,
+                                    //     );
+                                    // }
+                                    // debug!("\n");
+                                    if let Some(interprated) = sfrbx.interprete() {
+                                        match interprated {
+                                            RxmSfrbxInterpreted::GpsQzss(gps) => {
+                                                debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
+                                                eph_buffer.update(sv, gps);
+                                            },
+                                        }
+                                    }
+                                },
+                                Constellation::Glonass => {
+                                    let _freq_id = sfrbx.freq_id();
+                                },
+                                _ => {},
                             }
                         },
-                        Ok(_) => {
-                            // trace!("{} is not supported yet", constellation);
+                        Err(_) => {
+                            // error!("Non supported constellation: #{}", sfrbx.gnss_id());
                         },
-                        Err(e) => {
-                            error!("non supported constellation: {}", e);
-                        },
-                    };
+                    }
                 },
 
                 UbxPacketRef::InfTest(msg) => {
@@ -331,15 +346,15 @@ impl Ublox {
                 candidates.clear();
             }
 
-            for eph in eph_buffer.buffer.iter_mut() {
-                if eph.is_ready() {
-                    if let Some(keplerian) = eph.to_kepler() {
-                        match self.tx.send(Message::Kepler(keplerian)).await {
-                            Ok(_) => {},
-                            Err(e) => {
-                                error!("Failed to update {} keplerian state: {}", eph.sv, e);
-                            },
-                        }
+            for eph in eph_buffer.buffer.iter() {
+                if let Some(validated) = eph.validate() {
+                    let keplerian = validated.to_kepler(latest_t);
+
+                    match self.tx.send(Message::Kepler(keplerian)).await {
+                        Ok(_) => {},
+                        Err(e) => {
+                            error!("Failed to update {} keplerian state: {}", eph.sv, e);
+                        },
                     }
                 }
             }

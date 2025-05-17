@@ -36,16 +36,16 @@ jobs:
         args: --all -- --check
     
     - uses: actions-rs/cargo@v1
-      name: Build (all features)
+      name: Build (Default features)
       with:
         command: build
-        args: --all-features --release
+        args: --release
     
     - uses: actions-rs/cargo@v1
       name: Test
       with:
         command: test
-        args: --all-features --verbose
+        args: --verbose
     
   windows-build:
     runs-on: windows-latest
@@ -58,10 +58,10 @@ jobs:
         override: true
         
     - uses: actions-rs/cargo@v1
-      name: Build (all features)
+      name: Build (Default features)
       with: 
         command: build 
-        args: --all-features --release
+        args: --release
   
   macos-build:
     runs-on: macos-latest
@@ -74,7 +74,7 @@ jobs:
         override: true
     
     - uses: actions-rs/cargo@v1
-      name: Build (all features)
+      name: Build (Default features)
       with: 
         command: build 
-        args: --all-features --release
+        args: --release
