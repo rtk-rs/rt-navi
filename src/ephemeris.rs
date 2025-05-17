@@ -180,4 +180,21 @@ impl EphemerisBuffer {
             })
             .reduce(|k, _| k)
     }
+
+    pub fn tgd(&self, sv: SV) -> Option<Duration> {
+        self.buffer
+            .iter()
+            .filter_map(|buf| {
+                if buf.sv == sv {
+                    if let Some(validated) = buf.validate() {
+                        Some(Duration::from_seconds(validated.frame1.tgd_s))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .reduce(|k, _| k)
+    }
 }

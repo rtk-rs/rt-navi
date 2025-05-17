@@ -16,6 +16,23 @@ categories = [
 edition = "2021"
 readme = "README.md"
 
+[features]
+
+# U-Blox v23 by default
+default = ["ubx_proto23"]
+
+# Select U-Blox v14 protocol
+ubx_proto14 = ["ublox/ubx_proto14"]
+
+# Select U-Blox v23 protocol
+ubx_proto23 = ["ublox/ubx_proto23"]
+
+# Select U-Blox v27 protocol
+ubx_proto27 = ["ublox/ubx_proto27"]
+
+# Select U-Blox v31 protocol
+ubx_proto31 = ["ublox/ubx_proto31"]
+
 [dependencies]
 log = "0.4"
 thiserror = "2"
@@ -23,15 +40,16 @@ env_logger = "0.11.8"
 chrono = "0.4.29"
 nalgebra = "0.33"
 
-# ratatui = "0.29"
+ratatui = { version = "0.29", features = ["crossterm"] }
+# tui-logger = { version = "0.17", features = ["crossterm", "tracing-support"] }
 
 serialport = "4.7"
 tokio = { version = "1.45.0", features = ["full"] }
 clap = { version = "4.5", features = ["derive", "color"] }
 
-# ublox = { git = "https://github.com/ublox-rs/ublox", branch = "master" }
-ublox = { git = "https://github.com/ublox-rs/ublox", branch = "sfrbx-protos" }
-# ublox = { path = "../../ublox/ublox" }
+# ublox = { git = "https://github.com/ublox-rs/ublox", branch = "master", features = ["std", "ubx_proto23"] }
+# ublox = { git = "https://github.com/ublox-rs/ublox", branch = "sfrbx-protos", features = ["std", "ubx_proto23"]  }
+ublox = { path = "../../ublox/ublox", features = ["std"] }
 
 rtcm-rs = "0.11"
 
@@ -39,8 +57,8 @@ hifitime = { version = "4.0", features = ["serde", "std"] }
 anise = { git = "https://github.com/nyx-space/anise", branch = "dep/hifitime-github", features = ["embed_ephem"] }
 
 gnss-rs = { version = "2.3.5", features = ["serde"] }
-# gnss-rtk = { path = "../gnss-rtk", features = ["serde"] }
-gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "improvements", features = ["serde"] }
+gnss-rtk = { path = "../gnss-rtk", features = ["serde"] }
+# gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "improvements", features = ["serde"] }
 
 # gpx = { version = "0.10", optional = true }
 # kml = { version = "0.8", optional = true }

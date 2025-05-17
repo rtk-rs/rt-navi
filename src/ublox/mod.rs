@@ -219,6 +219,10 @@ impl Ublox {
                             if let Some(corr) = eph_buffer.clock_correction(t_gpst, sv) {
                                 candidate.set_clock_correction(corr);
                             }
+
+                            if let Some(tgd) = eph_buffer.tgd(sv) {
+                                candidate.set_group_delay(tgd);
+                            }
                         } else {
                             let observation =
                                 Observation::pseudo_range(carrier, meas.pr_mes(), None);
@@ -230,6 +234,10 @@ impl Ublox {
 
                             if let Some(corr) = eph_buffer.clock_correction(t_gpst, sv) {
                                 cd.set_clock_correction(corr);
+                            }
+
+                            if let Some(tgd) = eph_buffer.tgd(sv) {
+                                cd.set_group_delay(tgd);
                             }
 
                             candidates.push(cd);
@@ -272,25 +280,14 @@ impl Ublox {
                             let sv = SV::new(constellation, sfrbx.sv_id());
                             match constellation {
                                 Constellation::GPS | Constellation::QZSS => {
-                                    // DEBUG
-                                    for (index, dword) in sfrbx.dwrd().enumerate() {
-                                        // let dword = (dword & 0x3fffffc0) >> 6;
-
-                                        // debug!(
-                                        //     "UBX-SFRBX ({}) - dword #{} value=0x{:08x}",
-                                        //     sv, index, dword,
-                                        // );
-
-                                        // if index == 1 {
-                                        //     debug!(
-                                        //         "UBX-SFRBX ({}) frame_id=0x{:08x}",
-                                        //         sv,
-                                        //         ((dword >> 2) & 0x7)
-                                        //     );
-                                        // }
-                                    }
+                                    // // DEBUG
+                                    // for (index, dword) in sfrbx.dwrd().enumerate() {
+                                    //     debug!(
+                                    //         "UBX-SFRBX ({}) - dword #{} value=0x{:08x}",
+                                    //         sv, index, dword,
+                                    //     );
+                                    // }
                                     // debug!("\n");
-
                                     if let Some(interprated) = sfrbx.interprete() {
                                         match interprated {
                                             RxmSfrbxInterpreted::GpsQzss(gps) => {
