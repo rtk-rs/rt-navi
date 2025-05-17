@@ -41,15 +41,15 @@ pub struct Ublox {
     device: Device,
 }
 
-fn gnss_rtk_id(gnss_id: u8) -> Result<Constellation, Error> {
+fn gnss_rtk_id(gnss_id: u8) -> Option<Constellation> {
     match gnss_id {
-        0 => Ok(Constellation::GPS),
-        1 => Ok(Constellation::SBAS),
-        2 => Ok(Constellation::Galileo),
-        3 => Ok(Constellation::BeiDou),
-        5 => Ok(Constellation::QZSS),
-        6 => Ok(Constellation::Glonass),
-        id => Err(Error::NonSupportedGnss(id)),
+        0 => Some(Constellation::GPS),
+        1 => Some(Constellation::SBAS),
+        2 => Some(Constellation::Galileo),
+        3 => Some(Constellation::BeiDou),
+        5 => Some(Constellation::QZSS),
+        6 => Some(Constellation::Glonass),
+        id => None,
     }
 }
 
@@ -201,9 +201,9 @@ impl Ublox {
                         let carrier = Carrier::L1;
 
                         let constell = match gnss_rtk_id(gnss_id) {
-                            Ok(constell) => constell,
-                            Err(e) => {
-                                error!("non supported constellation: {}", e);
+                            Some(constell) => constell,
+                            None => {
+                                error!("non supported constellation: {}", gnss_id);
                                 continue;
                             },
                         };
@@ -276,7 +276,7 @@ impl Ublox {
 
                 UbxPacketRef::RxmSfrbx(sfrbx) => {
                     match gnss_rtk_id(sfrbx.gnss_id()) {
-                        Ok(constellation) => {
+                        Some(constellation) => {
                             let sv = SV::new(constellation, sfrbx.sv_id());
                             match constellation {
                                 Constellation::GPS | Constellation::QZSS => {
@@ -303,7 +303,7 @@ impl Ublox {
                                 _ => {},
                             }
                         },
-                        Err(_) => {
+                        None => {
                             // error!("Non supported constellation: #{}", sfrbx.gnss_id());
                         },
                     }

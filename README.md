@@ -31,9 +31,24 @@ An `RTK` option will be developped in near future.
 Compilation
 ===========
 
-The U-Blox library (one of our dependency) is not compatible with `--all-features`, as we use
-compilation features to select the U-Blox protocol (read down below). So `rt-navi` is not compatible
-with this compilation mode, you have to select the features you are interested one by one.
+It is not possible to compile `rt-navi` using `--all-features` because we have one
+compilation option per U-Blox protocol, and you can only select one at once. Read down below
+to understand how and why you should select the correct U-Blox protocol.
+
+Example: this will build `rt-navi` for U-Blox v23 (M8 series):
+
+```bash
+cargo build -r
+
+# which is equivalent to
+cargo build -r --features --ubx_proto23 
+```
+
+This will build `rt-navi` for U-Blox v27 (F9 series)
+
+```bash
+cargo build -r --features --ubx_proto27
+```
 
 Cross-compilation
 =================
@@ -93,29 +108,13 @@ defines which receiver you can operate!):
 - `ubx_proto27` v27 (for F9 series)
 - `ubx_proto31` v31 (for newer series)
 
-P.V.T solutions
-===============
-
-TODO
-
-Initial fix
-===========
-
-We offer a few options to specify initial `x`, `y` and `z` coordiates. This reduces the constraint
-to initial fix and make it easier to obtain. We recommend using this only if you have a rather good idea.
-
-```bash
-rt-navi -p /dev/ttyACM0 --coords-ecef-km=1000.0,2000.0,3000.0
-```
-
 Ecosystem
 =========
 
 `rt-navi` uses the combination of several major crates to achieve its objectives
 
-- [ANISE](https://github.com/nyx-space/anise)
-- [Hifitime](https://github.com/nyx-space/hifitime)
-- [Nyx-Space](https://github.com/nyx-space/nyx)
-- [SP3](https://github.com/rtk-rs/sp3)
-- [GNSS-RTK](https://github.com/rtk-rs/gnss-rtk)
-- [UBlox](https://github.com/ublox-rs/ublox)
+- [GNSS-RTK: P.V.T solver](https://github.com/rtk-rs/gnss-rtk)
+- [ANISE (by Nyx-space)](https://github.com/nyx-space/anise)
+- [Hifitime (by Nyx-space)](https://github.com/nyx-space/hifitime)
+- [UBlox parser](https://github.com/ublox-rs/ublox)
+- [RatatUi](https://github.com/ratatui)
