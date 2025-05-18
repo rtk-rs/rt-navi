@@ -48,8 +48,8 @@ tokio = { version = "1.45.0", features = ["full"] }
 clap = { version = "4.5", features = ["derive", "color"] }
 
 # ublox = { git = "https://github.com/ublox-rs/ublox", branch = "master", features = ["std", "ubx_proto23"] }
-# ublox = { git = "https://github.com/ublox-rs/ublox", branch = "sfrbx-protos", features = ["std", "ubx_proto23"]  }
-ublox = { path = "../../ublox/ublox", features = ["std"] }
+ublox = { git = "https://github.com/ublox-rs/ublox", branch = "sfrbx-protos", features = ["std", "ubx_proto23"]  }
+# ublox = { path = "../../ublox/ublox", features = ["std"] }
 
 rtcm-rs = "0.11"
 
@@ -57,8 +57,8 @@ hifitime = { version = "4.0", features = ["serde", "std"] }
 anise = { git = "https://github.com/nyx-space/anise", branch = "dep/hifitime-github", features = ["embed_ephem"] }
 
 gnss-rs = { version = "2.3.5", features = ["serde"] }
-gnss-rtk = { path = "../gnss-rtk", features = ["serde"] }
-# gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "improvements", features = ["serde"] }
+# gnss-rtk = { path = "../gnss-rtk", features = ["serde"] }
+gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "improvements", features = ["serde"] }
 
 # gpx = { version = "0.10", optional = true }
 # kml = { version = "0.8", optional = true }
