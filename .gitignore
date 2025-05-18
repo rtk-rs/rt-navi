@@ -15,3 +15,5 @@ Cargo.lock
 
 *.swp
 *.swo
+*.txt
+*.logs

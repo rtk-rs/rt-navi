@@ -28,6 +28,13 @@ PPP / RTK
 
 An `RTK` option will be developped in near future.
 
+Compilation
+===========
+
+The U-Blox library (one of our dependency) is not compatible with `--all-features`, as we use
+compilation features to select the U-Blox protocol (read down below). So `rt-navi` is not compatible
+with this compilation mode, you have to select the features you are interested one by one.
+
 Cross-compilation
 =================
 
@@ -73,6 +80,18 @@ RUST_LOG=debug rt-navi -p /dev/ttyACM0
 
 Soon the navigation messages gathering starts, and so does the measurement collection.  
 When both align and everything becomes feasible, the solver naturally consumes all of this data and we obtain a P.V.T:
+
+U-Blox specificity
+==================
+
+`rt-navi` currently requires a U-Blox receiver to operate. We offer several compilation options
+to select the U-Blox protocol (`"protocol"` version being very important, because it actually
+defines which receiver you can operate!):
+
+- `ubx_proto23` v23 (Default, for M8 series)
+- `ubx_proto14` v14
+- `ubx_proto27` v27 (for F9 series)
+- `ubx_proto31` v31 (for newer series)
 
 P.V.T solutions
 ===============
