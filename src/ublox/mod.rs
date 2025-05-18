@@ -288,7 +288,7 @@ impl Ublox {
                                     //     );
                                     // }
                                     // debug!("\n");
-                                    if let Some(interprated) = sfrbx.interprete() {
+                                    if let Some(interprated) = sfrbx.interpret() {
                                         match interprated {
                                             RxmSfrbxInterpreted::GpsQzss(gps) => {
                                                 debug!("UBX-SFRBX ({}) - {:?}", sv, gps);
