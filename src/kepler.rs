@@ -2,11 +2,11 @@ use anise::math::Matrix3;
 use log::debug;
 use std::{cell::RefCell, f64::consts::PI};
 
-use ublox::{RxmSfrbxGpsQzssFrame1, RxmSfrbxGpsQzssFrame2, RxmSfrbxGpsQzssFrame3};
-
 use gnss_rtk::prelude::{
     Duration, Epoch, Frame, Orbit, OrbitSource, TimeScale, SPEED_OF_LIGHT_M_S, SV,
 };
+
+use gnss_protos::{GpsQzssFrame1, GpsQzssFrame2, GpsQzssFrame3};
 
 use crate::ephemeris::GpsSvEphemeris;
 
@@ -42,9 +42,9 @@ impl SVKepler {
         toe_s: f64,
         toc_gpst: Epoch,
         toe_gpst: Epoch,
-        frame1: &RxmSfrbxGpsQzssFrame1,
-        frame2: &RxmSfrbxGpsQzssFrame2,
-        frame3: &RxmSfrbxGpsQzssFrame3,
+        frame1: &GpsQzssFrame1,
+        frame2: &GpsQzssFrame2,
+        frame3: &GpsQzssFrame3,
     ) -> Self {
         Self {
             sv,
