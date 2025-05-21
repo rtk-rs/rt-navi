@@ -47,9 +47,9 @@ serialport = "4.7"
 tokio = { version = "1.45.0", features = ["full"] }
 clap = { version = "4.5", features = ["derive", "color"] }
 
-# ublox = { git = "https://github.com/ublox-rs/ublox", branch = "master", features = ["std", "ubx_proto23"] }
-ublox = { git = "https://github.com/ublox-rs/ublox", branch = "sfrbx-protos", features = ["std", "ubx_proto23"]  }
+# ublox = { git = "https://github.com/ublox-rs/ublox", branch = "master", features = ["std", "ubx_proto23", "sfrbx-gps"] }
 # ublox = { path = "../../ublox/ublox", features = ["std", "sfrbx-gps"] }
+ublox = { git = "https://github.com/ublox-rs/ublox", branch = "sfrbx-protos", features = ["std", "ubx_proto23", "sfrbx-gps"]  }
 
 gnss-protos = { version = "0.0.2", features = ["gps"] }
 # gnss-protos = { git = "https://github.com/rtk-rs/gnss-protos", features = "gps" }
