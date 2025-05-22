@@ -62,7 +62,7 @@ anise = { git = "https://github.com/nyx-space/anise", branch = "dep/hifitime-git
 
 gnss-rs = { version = "2.3.5", features = ["serde"] }
 # gnss-rtk = { path = "../gnss-rtk", features = ["serde"] }
-gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "improvements", features = ["serde"] }
+gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", branch = "main", features = ["serde"] }
 
 # gpx = { version = "0.10", optional = true }
 # kml = { version = "0.8", optional = true }
