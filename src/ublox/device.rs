@@ -5,7 +5,9 @@ use std::{
 
 use serialport::SerialPort;
 
-use ublox::{PacketRef, Parser, UbxPacketMeta};
+use ublox::{AnyPacketRef, PacketRef, Parser, UbxPacketMeta};
+
+use rtcm_rs::{next_msg_frame, Message as RtcmMessage, MessageFrame};
 
 pub trait UbxPacketHandler {
     fn handle(&mut self, _packet: PacketRef<'_>) {}
@@ -91,11 +93,27 @@ impl Device {
 
             // parser.consume_ubx adds the buffer to its internal buffer, and
             // returns an iterator-like object we can use to process the packets
-            let mut it = self.parser.consume_ubx(&local_buf[..nbytes]);
+            let mut it = self.parser.consume_ubx_rtcm(&local_buf[..nbytes]);
             loop {
                 match it.next() {
-                    Some(Ok(packet)) => {
-                        handler.handle(packet);
+                    Some(Ok(packet)) => match packet {
+                        AnyPacketRef::Ubx(packet) => handler.handle(packet),
+                        #[cfg(not(feature = "rtcm"))]
+                        AnyPacketRef::Rtcm(_) => {
+                            // RTCM not handled
+                        },
+                        #[cfg(feature = "rtcm")]
+                        AnyPacketRef::Rtcm(packet) => {
+                            let (_, frame) = next_msg_frame(packet.data);
+                            if let Some(frame) = frame {
+                                match frame.get_message() {
+                                    RtcmMessage::Msg1001(msg) => {
+                                        trace!("RTCM 1001: {:?}", msg);
+                                    },
+                                    _ => {},
+                                }
+                            }
+                        },
                     },
                     Some(Err(e)) => {
                         eprintln!("Malformed packet, ignore it; cause {e}");

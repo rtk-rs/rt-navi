@@ -18,8 +18,10 @@ readme = "README.md"
 
 [features]
 
-# U-Blox v23 by default
-default = ["ubx_proto23"]
+# Default features
+#  - UBX v23 protocol
+#  - Support of RTCM frames from ublox
+default = ["ubx_proto23", "rtcm"]
 
 # Select U-Blox v14 protocol
 ubx_proto14 = ["ublox/ubx_proto14"]
@@ -32,6 +34,9 @@ ubx_proto27 = ["ublox/ubx_proto27"]
 
 # Select U-Blox v31 protocol
 ubx_proto31 = ["ublox/ubx_proto31"]
+
+# Ulock RTCM frames download
+rtcm = ["dep:rtcm-rs"]
 
 [dependencies]
 log = "0.4"
@@ -55,7 +60,7 @@ gnss-protos = { version = "0.0.2", features = ["gps"] }
 # gnss-protos = { git = "https://github.com/rtk-rs/gnss-protos", features = "gps" }
 # gnss-protos = { path = "../gnss-protos", features = ["gps"] }
 
-rtcm-rs = "0.11"
+rtcm-rs = { version = "0.11", optional = true }
 
 hifitime = { version = "4.0", features = ["serde", "std"] }
 anise = { git = "https://github.com/nyx-space/anise", branch = "dep/hifitime-github", features = ["embed_ephem"] }

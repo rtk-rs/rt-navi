@@ -35,6 +35,10 @@ The U-Blox library (one of our dependency) is not compatible with `--all-feature
 compilation features to select the U-Blox protocol (read down below). So `rt-navi` is not compatible
 with this compilation mode, you have to select the features you are interested one by one.
 
+Other features
+
+- `rtcm`: unlock RTCM frame download (an soon, upload..)
+
 Cross-compilation
 =================
 
