@@ -17,9 +17,11 @@ mod cli;
 // mod clock;
 mod ephemeris;
 mod kepler;
-// mod rtcm;
 mod time;
 mod ublox;
+
+#[cfg(feature = "rtcm")]
+mod rtcm;
 
 use env_logger::{Builder, Target};
 

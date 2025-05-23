@@ -6,10 +6,11 @@ mod device;
 use device::Device;
 
 use ublox::{
-    cfg_val::CfgVal, AlignmentToReferenceTime, CfgLayerSet, CfgMsgAllPortsBuilder, CfgRate,
-    CfgRateBuilder, CfgValSetBuilder, GnssFixType, MonVer, NavPvt, PacketRef as UbxPacketRef,
-    Position as UbxPosition, RxmRawx, RxmSfrbx, RxmSfrbxInterpreted, UbxPacketRequest,
-    Velocity as UbxVelocity,
+    cfg_val::CfgVal, AlignmentToReferenceTime, CfgLayerSet, CfgMsgAllPortsBuilder, CfgPrtUart,
+    CfgPrtUartBuilder, CfgRate, CfgRateBuilder, CfgValSetBuilder, DataBits, GnssFixType,
+    InProtoMask, MonVer, NavPvt, OutProtoMask, PacketRef as UbxPacketRef, Parity,
+    Position as UbxPosition, RxmRawx, RxmSfrbx, RxmSfrbxInterpreted, StopBits, UartMode,
+    UartPortId, UbxPacketRequest, Velocity as UbxVelocity,
 };
 
 use serialport::{
@@ -25,12 +26,18 @@ use gnss_rtk::prelude::{
 
 use crate::kepler::SVKepler;
 
+#[cfg(feature = "rtcm")]
+use rtcm_rs::Message as RtcmMessage;
+
 pub enum Message {
     /// Kepler update
     Kepler(SVKepler),
 
     /// Proposal
     Proposal(Vec<Candidate>),
+
+    #[cfg(feature = "rtcm")]
+    RtcmMessage(RtcmMessage),
 }
 
 pub struct Ublox {
@@ -73,9 +80,46 @@ impl Ublox {
         }
     }
 
+    fn port_configuration(
+        &mut self,
+        baud_rate: u32,
+        in_proto_mask: InProtoMask,
+        out_proto_mask: OutProtoMask,
+    ) {
+        self.device
+            .write_all(
+                &CfgPrtUartBuilder {
+                    portid: UartPortId::Usb,
+                    reserved0: 0,
+                    tx_ready: 0,
+                    mode: UartMode::new(DataBits::Eight, Parity::Even, StopBits::One),
+                    baud_rate: baud_rate,
+                    in_proto_mask,
+                    out_proto_mask,
+                    flags: 0,
+                    reserved5: 0,
+                }
+                .into_packet_bytes(),
+            )
+            .unwrap_or_else(|e| {
+                panic!("U-Blox port configuration failed with: {}", e);
+            });
+
+        self.device
+            .wait_for_ack::<CfgPrtUart>()
+            .unwrap_or_else(|e| {
+                panic!("U-Blox port configuration failed with: {}", e);
+            });
+    }
+
     /// Initialize hardware device
     pub fn init(&mut self, sampling_period_nanos: u64) {
-        // activate GPS + QZSS + Galileo
+        // port configuration
+        let in_protos = InProtoMask::UBLOX | InProtoMask::RTCM;
+        let out_protos = OutProtoMask::UBLOX | OutProtoMask::RTCM3;
+
+        self.port_configuration(9_600, in_protos, out_protos);
+
         let mut cfg_data = Vec::<CfgVal>::new();
 
         cfg_data.push(CfgVal::SignalGpsEna(true));
@@ -104,7 +148,7 @@ impl Ublox {
 
         self.device
             .write_all(
-                &CfgMsgAllPortsBuilder::set_rate_for::<RxmRawx>([1, 1, 1, 1, 1, 1])
+                &CfgMsgAllPortsBuilder::set_rate_for::<RxmRawx>([0, 0, 0, 1, 0, 0])
                     .into_packet_bytes(),
             )
             .unwrap_or_else(|e| panic!("Failed to activate RxmRawx msg: {}", e));
@@ -113,7 +157,7 @@ impl Ublox {
 
         self.device
             .write_all(
-                &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([1, 1, 1, 1, 1, 1])
+                &CfgMsgAllPortsBuilder::set_rate_for::<NavPvt>([0, 0, 0, 1, 0, 0])
                     .into_packet_bytes(),
             )
             .unwrap_or_else(|e| panic!("Failed to activate NavPvt msg: {}", e));
@@ -122,7 +166,7 @@ impl Ublox {
 
         self.device
             .write_all(
-                &CfgMsgAllPortsBuilder::set_rate_for::<RxmSfrbx>([1, 1, 1, 1, 1, 1])
+                &CfgMsgAllPortsBuilder::set_rate_for::<RxmSfrbx>([0, 0, 0, 1, 0, 0])
                     .into_packet_bytes(),
             )
             .unwrap_or_else(|e| panic!("Failed to activate RxmSfrbx msg: {}", e));

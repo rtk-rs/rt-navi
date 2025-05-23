@@ -35,40 +35,6 @@ impl Device {
         Device { port, parser }
     }
 
-    // /// Configure u-Blox port
-    // pub fn configure_port(
-    //     &mut self,
-    //     port_config: Option<UbxPortConfiguration>,
-    // ) {
-    //     if let Some(config) = port_config {
-
-    //         println!("Configuring '{}' port ...", config.port_name.to_uppercase());
-
-    //         self.write_all(
-    //             &CfgPrtUartBuilder {
-    //                 portid: config.port_id.unwrap(),
-    //                 reserved0: 0,
-    //                 tx_ready: 0,
-    //                 mode: UartMode::new(config.data_bits, config.parity, config.stop_bits),
-    //                 baud_rate: config.baud_rate,
-    //                 in_proto_mask: config.in_proto_mask,
-    //                 out_proto_mask: config.out_proto_mask,
-    //                 flags: 0,
-    //                 reserved5: 0,
-    //             }
-    //             .into_packet_bytes(),
-    //         )
-    //         .unwrap_or_else(|e| {
-    //             panic!("U-Blox port configuration failed with: {}", e);
-    //         });
-
-    //         self.wait_for_ack::<CfgPrtUart>()
-    //             .unwrap_or_else(|e| {
-    //                 panic!("U-Blox port configuration failed with: {}", e);
-    //             });
-    //     }
-    // }
-
     /// Writes all data to serial port
     pub fn write_all(&mut self, data: &[u8]) -> IoResult<()> {
         self.port.write_all(data)
@@ -103,16 +69,11 @@ impl Device {
                             // RTCM not handled
                         },
                         #[cfg(feature = "rtcm")]
-                        AnyPacketRef::Rtcm(packet) => {
-                            let (_, frame) = next_msg_frame(packet.data);
-                            if let Some(frame) = frame {
-                                match frame.get_message() {
-                                    RtcmMessage::Msg1001(msg) => {
-                                        trace!("RTCM 1001: {:?}", msg);
-                                    },
-                                    _ => {},
-                                }
-                            }
+                        AnyPacketRef::Rtcm(rtcm_frame) => match rtcm_frame.get_message() {
+                            RtcmMessage::Msg1001(msg) => {
+                                trace!("RTCM 1001: {:?}", msg);
+                            },
+                            _ => {},
                         },
                     },
                     Some(Err(e)) => {
