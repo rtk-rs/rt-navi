@@ -29,6 +29,13 @@ use ntrip::NTRIPInfos;
 #[cfg(feature = "rtcm")]
 use ntrip_client::NTRIPClient;
 
+
+#[cfg(feature = "rtcm")]
+use rtcm_rs::{
+    msg::{Msg1001T},
+    Message as RtcmMessage,
+};
+
 use env_logger::{Builder, Target};
 
 #[macro_use]
@@ -78,6 +85,9 @@ async fn main() -> Result<(), Error> {
     // create channels
     let (ublox_tx, mut ublox_rx) = mpsc::channel(16);
 
+    #[cfg(feature = "rtcm")]
+    let (rtcm_tx, mut rtcm_rx) = mpsc::channel(16);
+
     let bias = BiasModels {};
     let time_source = Time {};
 
@@ -121,7 +131,7 @@ async fn main() -> Result<(), Error> {
         }
 
         tokio::spawn(async move {
-            client.run().await.unwrap_or_else(|e| {
+            client.run(rtcm_tx).await.unwrap_or_else(|e| {
                 panic!("NTRIP client failed with: {}", e);
             });
         });
@@ -130,8 +140,8 @@ async fn main() -> Result<(), Error> {
     info!("rt-navi deployed");
 
     loop {
-        while let Some(msg) = ublox_rx.recv().await {
-            match msg {
+        match ublox_rx.try_recv() {
+            Ok(msg) => match msg {
                 Message::Proposal(candidates) => {
                     let epoch = candidates[0].t;
                     debug!("{} - new proposal ({} candidates)", epoch, candidates.len());
@@ -158,7 +168,44 @@ async fn main() -> Result<(), Error> {
                 Message::RtcmMessage(message) => {
                     debug!("Receiver RTCM message {:?}", message);
                 },
-            }
+            },
+            Err(e) => {
+            },
         }
+
+        #[cfg(feature = "rtcm")]
+        match rtcm_rx.try_recv() {
+            Ok(message) => match message {
+                RtcmMessage::Corrupt => {
+                    error!("received corrupt RTCM message");
+                },
+                RtcmMessage::Empty => {
+                    trace!("received empty RTCM message");
+                },
+                RtcmMessage::Msg1001(msg1001) => {
+                    debug!("received message from reference site #{}", msg1001.reference_station_id);
+                },
+                RtcmMessage::Msg1096(msg1096) => {
+                    debug!("received message from reference site #{}", msg1096.reference_station_id);
+                },
+                RtcmMessage::Msg1087(msg1087) => {
+                    debug!("received message from reference site #{}", msg1087.reference_station_id);
+                },
+                RtcmMessage::Msg1086(msg1086) => {
+                    debug!("received message from reference site #{}", msg1086.reference_station_id);
+                },
+                RtcmMessage::Msg1046(msg1046) => {
+                    debug!("received 1046# mmessage from reference site")
+                },
+                RtcmMessage::Msg1077(msg1077) => {
+                    debug!("received message from reference site #{}", msg1077.reference_station_id);
+                },
+                _ => {},
+            },
+            Err(e) => {
+            },
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
