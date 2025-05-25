@@ -21,17 +21,22 @@ mod time;
 mod ublox;
 
 #[cfg(feature = "rtcm")]
-mod rtcm;
+mod ntrip;
+
+#[cfg(feature = "rtcm")]
+use ntrip::NTRIPInfos;
+
+#[cfg(feature = "rtcm")]
+use ntrip_client::NTRIPClient;
 
 use env_logger::{Builder, Target};
 
 #[macro_use]
 extern crate log;
 
-use rtcm::RtcmClient;
 use thiserror::Error;
 
-use gnss_rtk::prelude::{Almanac, Config, Method, Rc, User, EARTH_J2000, PPP};
+use gnss_rtk::prelude::{Almanac, Config, Rc, User, EARTH_J2000, PPP};
 
 use tokio::sync::mpsc;
 
@@ -108,10 +113,20 @@ async fn main() -> Result<(), Error> {
     });
 
     #[cfg(feature = "rtcm")]
-    for host in cli.matches.get_many::<String>("rtcm") {
+    if let Some(infos) = cli.matches.get_one::<NTRIPInfos>("ntrip") {
+        
+        let mut client = NTRIPClient::new(&infos.host, infos.port, &infos.mount);
 
-        let client = RtcmClient::new("ntrip://caster.centipede", 10, ublox_tx.clone());
+        if let (Some(user), Some(password)) = (&infos.username, &infos.password) {
+            client = client.with_credentials(&user, &password);
+        }
 
+        tokio::spawn(async move {
+            client.run().await
+                .unwrap_or_else(|e| {
+                    panic!("NTRIP client failed with: {}", e);
+                });
+        });
     }
 
     info!("rt-navi deployed");

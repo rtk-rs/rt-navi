@@ -57,24 +57,12 @@ impl Device {
                 break;
             }
 
-            // parser.consume_ubx adds the buffer to its internal buffer, and
-            // returns an iterator-like object we can use to process the packets
-            let mut it = self.parser.consume_ubx_rtcm(&local_buf[..nbytes]);
+            let mut it = self.parser.consume_ubx(&local_buf[..nbytes]);
+
             loop {
                 match it.next() {
-                    Some(Ok(packet)) => match packet {
-                        AnyPacketRef::Ubx(packet) => handler.handle(packet),
-                        #[cfg(not(feature = "rtcm"))]
-                        AnyPacketRef::Rtcm(_) => {
-                            // RTCM not handled
-                        },
-                        #[cfg(feature = "rtcm")]
-                        AnyPacketRef::Rtcm(rtcm_frame) => match rtcm_frame.get_message() {
-                            RtcmMessage::Msg1001(msg) => {
-                                trace!("RTCM 1001: {:?}", msg);
-                            },
-                            _ => {},
-                        },
+                    Some(Ok(packet)) => {
+                        handler.handle(packet);
                     },
                     Some(Err(e)) => {
                         eprintln!("Malformed packet, ignore it; cause {e}");

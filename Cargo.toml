@@ -38,7 +38,6 @@ ubx_proto31 = ["ublox/ubx_proto31"]
 # Ulock RTCM frames download
 rtcm = [
     "dep:rtcm-rs",
-    "ublox/rtcm",
 ]
 
 [dependencies]
@@ -54,7 +53,8 @@ hifitime = { version = "4.0", features = ["std"] }
 tokio = { version = "1.45.0", features = ["full"] }
 clap = { version = "4.5", features = ["derive", "color"] }
 
-ntrip-client = { git = "https://github.com/rtk-rs/ntrip-client", rev = "8ed6bc6b3f6dc855eb6b6406328c4a83d831f332", features = ["log"] }
+# gpx = { version = "0.10", optional = true }
+# kml = { version = "0.8", optional = true }
 
 gnss-protos = { version = "0.0.2", features = ["gps"] }
 # gnss-protos = { path = "../gnss-protos", features = ["gps"] }
@@ -66,5 +66,5 @@ gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", rev = "1455e3a600ea27de
 anise = { git = "https://github.com/nyx-space/anise", branch = "dep/hifitime_4_1_0", features = ["embed_ephem"] }
 ublox = { git = "https://github.com/ublox-rs/ublox", rev = "2fa6761b2ccd4344326ad55f0dadc5965e06e957", features = ["std", "ubx_proto23", "sfrbx-gps"]  }
 
-# gpx = { version = "0.10", optional = true }
-# kml = { version = "0.8", optional = true }
+ntrip-client = { git = "https://github.com/rtk-rs/ntrip-client", rev = "8ed6bc6b3f6dc855eb6b6406328c4a83d831f332", features = ["log"] }
+# ntrip-client = { path = "../ntrip-client", features = ["log"] }

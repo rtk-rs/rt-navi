@@ -8,6 +8,9 @@ pub use ubx::CommandBuilder as UbxCommandBuilder;
 
 use clap::{value_parser, Arg, ArgAction, ArgMatches, ColorChoice, Command};
 
+#[cfg(feature = "rtcm")]
+use crate::ntrip::NTRIPInfos;
+
 pub struct SerialPortOpts {
     pub port_name: String,
     pub port_baud: u32,
@@ -52,18 +55,23 @@ impl Cli {
 
             
         #[cfg(feature = "rtcm")]
-        let cmd = cmd.next_help_heading("RTCM Clients");
+        let cmd = cmd.next_help_heading("NTRIP Client");
 
         #[cfg(feature = "rtcm")]
         let cmd = cmd.arg(
-                Arg::new("rtcm")
-                    .long("rtcm")
+                Arg::new("ntrip")
+                    .long("ntrip")
                     .required(false)
-                    .value_name("URL")
+                    .value_name("host:port/mountpoint/user=$name,password=$password")
+                    .value_parser(value_parser!(NTRIPInfos))
                     .action(ArgAction::Append)
-                    .help("Connect to given RTCM host.
-Add as many as you need. You should use RTCM links which short baselines (local area).
-A minimum of one RTCM link is required for RTK navigation technique."));
+                    .help("Connect to NTRIP server.
+Supports NTRIP V1 and V2, and two formats:
+ (1) Passwordless connection: --ntrip host:port/mount
+ (2) With credentials: --ntrip host:port/mount/user=$name,password=$pwd
+
+Example: --ntrip 192.168.1.10:1234/custom
+Example: --ntrip caster.centipede.fr:2101/PARIS/user=centipede,password=centipede."));
 
         Self {
             matches: cmd.get_matches(),
