@@ -13,7 +13,6 @@ pub struct NTRIPInfos {
 }
 
 impl std::str::FromStr for NTRIPInfos {
-
     type Err = NTRIPParsing;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {

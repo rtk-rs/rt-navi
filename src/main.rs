@@ -114,7 +114,6 @@ async fn main() -> Result<(), Error> {
 
     #[cfg(feature = "rtcm")]
     if let Some(infos) = cli.matches.get_one::<NTRIPInfos>("ntrip") {
-        
         let mut client = NTRIPClient::new(&infos.host, infos.port, &infos.mount);
 
         if let (Some(user), Some(password)) = (&infos.username, &infos.password) {
@@ -122,10 +121,9 @@ async fn main() -> Result<(), Error> {
         }
 
         tokio::spawn(async move {
-            client.run().await
-                .unwrap_or_else(|e| {
-                    panic!("NTRIP client failed with: {}", e);
-                });
+            client.run().await.unwrap_or_else(|e| {
+                panic!("NTRIP client failed with: {}", e);
+            });
         });
     }
 
@@ -156,12 +154,10 @@ async fn main() -> Result<(), Error> {
                     kepler_buf.latch(keplerian);
                 },
 
-
                 #[cfg(feature = "rtcm")]
                 Message::RtcmMessage(message) => {
                     debug!("Receiver RTCM message {:?}", message);
                 },
-                
             }
         }
     }
