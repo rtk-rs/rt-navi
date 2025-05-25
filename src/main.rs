@@ -76,11 +76,8 @@ async fn main() -> Result<(), Error> {
     let kepler_buf = Rc::new(KeplerBuffer::new());
 
     let mut user_profile = User::default();
-    user_profile.profile = None;
 
-    let mut cfg = Config::static_preset(Method::SPP);
-
-    cfg.min_sv_elev = Some(10.0);
+    let mut cfg = Config::default();
     cfg.solver.max_gdop = 10.0;
 
     debug!("deployed with {} {:#?}", user_profile, cfg);
