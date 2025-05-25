@@ -17,9 +17,24 @@ mod cli;
 // mod clock;
 mod ephemeris;
 mod kepler;
-// mod rtcm;
 mod time;
 mod ublox;
+
+#[cfg(feature = "rtcm")]
+mod ntrip;
+
+#[cfg(feature = "rtcm")]
+use ntrip::NTRIPInfos;
+
+#[cfg(feature = "rtcm")]
+use ntrip_client::NTRIPClient;
+
+
+#[cfg(feature = "rtcm")]
+use rtcm_rs::{
+    msg::{Msg1001T},
+    Message as RtcmMessage,
+};
 
 use env_logger::{Builder, Target};
 
@@ -28,7 +43,7 @@ extern crate log;
 
 use thiserror::Error;
 
-use gnss_rtk::prelude::{Almanac, Config, Method, Rc, User, EARTH_J2000, PPP};
+use gnss_rtk::prelude::{Almanac, Config, Rc, User, EARTH_J2000, PPP};
 
 use tokio::sync::mpsc;
 
@@ -70,6 +85,9 @@ async fn main() -> Result<(), Error> {
     // create channels
     let (ublox_tx, mut ublox_rx) = mpsc::channel(16);
 
+    #[cfg(feature = "rtcm")]
+    let (rtcm_tx, mut rtcm_rx) = mpsc::channel(16);
+
     let bias = BiasModels {};
     let time_source = Time {};
 
@@ -96,7 +114,7 @@ async fn main() -> Result<(), Error> {
 
     let serial_port_opts = cli.serial_port_opts();
 
-    let mut ublox = Ublox::new(serial_port_opts, ublox_tx);
+    let mut ublox = Ublox::new(serial_port_opts, ublox_tx.clone());
 
     ublox.init(sampling_period_nanos);
 
@@ -104,11 +122,26 @@ async fn main() -> Result<(), Error> {
         ublox.tasklet().await;
     });
 
+    #[cfg(feature = "rtcm")]
+    if let Some(infos) = cli.matches.get_one::<NTRIPInfos>("ntrip") {
+        let mut client = NTRIPClient::new(&infos.host, infos.port, &infos.mount);
+
+        if let (Some(user), Some(password)) = (&infos.username, &infos.password) {
+            client = client.with_credentials(&user, &password);
+        }
+
+        tokio::spawn(async move {
+            client.run(rtcm_tx).await.unwrap_or_else(|e| {
+                panic!("NTRIP client failed with: {}", e);
+            });
+        });
+    }
+
     info!("rt-navi deployed");
 
     loop {
-        while let Some(msg) = ublox_rx.recv().await {
-            match msg {
+        match ublox_rx.try_recv() {
+            Ok(msg) => match msg {
                 Message::Proposal(candidates) => {
                     let epoch = candidates[0].t;
                     debug!("{} - new proposal ({} candidates)", epoch, candidates.len());
@@ -130,7 +163,49 @@ async fn main() -> Result<(), Error> {
                 Message::Kepler(keplerian) => {
                     kepler_buf.latch(keplerian);
                 },
-            }
+
+                #[cfg(feature = "rtcm")]
+                Message::RtcmMessage(message) => {
+                    debug!("Receiver RTCM message {:?}", message);
+                },
+            },
+            Err(e) => {
+            },
         }
+
+        #[cfg(feature = "rtcm")]
+        match rtcm_rx.try_recv() {
+            Ok(message) => match message {
+                RtcmMessage::Corrupt => {
+                    error!("received corrupt RTCM message");
+                },
+                RtcmMessage::Empty => {
+                    trace!("received empty RTCM message");
+                },
+                RtcmMessage::Msg1001(msg1001) => {
+                    debug!("received message from reference site #{}", msg1001.reference_station_id);
+                },
+                RtcmMessage::Msg1096(msg1096) => {
+                    debug!("received message from reference site #{}", msg1096.reference_station_id);
+                },
+                RtcmMessage::Msg1087(msg1087) => {
+                    debug!("received message from reference site #{}", msg1087.reference_station_id);
+                },
+                RtcmMessage::Msg1086(msg1086) => {
+                    debug!("received message from reference site #{}", msg1086.reference_station_id);
+                },
+                RtcmMessage::Msg1046(msg1046) => {
+                    debug!("received 1046# mmessage from reference site")
+                },
+                RtcmMessage::Msg1077(msg1077) => {
+                    debug!("received message from reference site #{}", msg1077.reference_station_id);
+                },
+                _ => {},
+            },
+            Err(e) => {
+            },
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
     }
 }
