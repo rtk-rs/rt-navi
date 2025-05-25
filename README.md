@@ -21,12 +21,13 @@ Licensing
 This application is part of the [RTK-rs framework](https://github.com/rtk-rs) which
 is delivered under the [Mozilla V2 Public](https://www.mozilla.org/en-US/MPL/2.0) license.
 
-PPP / RTK 
-=========
+RT-NAVI
+=======
 
-`rt-navi` offers direct/absolute navigation by default (also referred to as `PPP`).  
+`rt-navi` standards for Real Time Navigation, and is counterpart workflow to our postprocessing
+framework (basically [GNSS-Qc](https://github.com/rtk-rs/gnss-qc) and [RINEX-Cli](https://github.com/rtk-rs/rinex-cli)).
 
-An `RTK` option will be developped in near future.
+`rt-navi` is currently limited to PPP navigation (no reference station).
 
 Compilation
 ===========
@@ -42,14 +43,13 @@ Other features
 Cross-compilation
 =================
 
-`rt-navi` is compatible with cross-compilation, but it currently requires support of the `std` library.
+`rt-navi` is compatible with cross-compilation, but it currently requires the `std` library,
+due to several advanced internal dependencies.
 
 Deployment
 ==========
 
-Activate `$RUST_LOG` to have more information. Use `trace` to unlock all traces.
-
-Use `-p` to specify the serial interface to the U-Blox. 
+Connect to your U-Blox with `--port,-p` (serial interface):
 
 ```bash
 RUST_LOG=debug rt-navi -p /dev/ttyACM0
@@ -102,14 +102,17 @@ P.V.T solutions
 
 TODO
 
-Initial fix
-===========
+RTCM reference links (Base Stations)
+====================================
 
-We offer a few options to specify initial `x`, `y` and `z` coordiates. This reduces the constraint
-to initial fix and make it easier to obtain. We recommend using this only if you have a rather good idea.
+You can deploy a `RTCM` client for as many base stations as you need, using the `--rtcm` option.
+A client (listener) is deployed for each one that you specify.   
+NB: `gnss-rtk` is currently limited to one REF station is practice.
 
-```bash
-rt-navi -p /dev/ttyACM0 --coords-ecef-km=1000.0,2000.0,3000.0
+Example:
+
+```C
+RUST_LOG=debug rt-navi -p /dev/ttyACM0 --rtcm ntrip
 ```
 
 Ecosystem

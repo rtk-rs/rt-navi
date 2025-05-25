@@ -16,11 +16,11 @@ pub struct RtcmClient {
 }
 
 impl RtcmClient {
-    pub fn new(host: String, port: u16, tx: Sender<Message>) -> Self {
+    pub fn new(host: &str, port: u16, tx: Sender<Message>) -> Self {
         Self {
-            caster: host,
             port,
             tx,
+            caster: host.to_string(),
         }
     }
 

@@ -28,6 +28,7 @@ use env_logger::{Builder, Target};
 #[macro_use]
 extern crate log;
 
+use rtcm::RtcmClient;
 use thiserror::Error;
 
 use gnss_rtk::prelude::{Almanac, Config, Method, Rc, User, EARTH_J2000, PPP};
@@ -101,13 +102,20 @@ async fn main() -> Result<(), Error> {
 
     let serial_port_opts = cli.serial_port_opts();
 
-    let mut ublox = Ublox::new(serial_port_opts, ublox_tx);
+    let mut ublox = Ublox::new(serial_port_opts, ublox_tx.clone());
 
     ublox.init(sampling_period_nanos);
 
     tokio::spawn(async move {
         ublox.tasklet().await;
     });
+
+    #[cfg(feature = "rtcm")]
+    for host in cli.matches.get_many::<String>("rtcm") {
+
+        let client = RtcmClient::new("ntrip://caster.centipede", 10, ublox_tx.clone());
+
+    }
 
     info!("rt-navi deployed");
 
@@ -135,6 +143,13 @@ async fn main() -> Result<(), Error> {
                 Message::Kepler(keplerian) => {
                     kepler_buf.latch(keplerian);
                 },
+
+
+                #[cfg(feature = "rtcm")]
+                Message::RtcmMessage(message) => {
+                    debug!("Receiver RTCM message {:?}", message);
+                },
+                
             }
         }
     }
