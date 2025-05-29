@@ -33,6 +33,33 @@ ubx_proto27 = ["ublox/ubx_proto27"]
 # Select U-Blox v31 protocol
 ubx_proto31 = ["ublox/ubx_proto31"]
 
+[dependencies.ublox]
+git = "https://github.com/ublox-rs/ublox"
+rev = "2fa6761b2ccd4344326ad55f0dadc5965e06e957"
+features = [
+    "std",
+    "sfrbx-gps",
+    "ubx_proto23"
+]
+
+[dependencies.gnss-rtk]
+git = "https://github.com/rtk-rs/gnss-rtk"
+rev = "5eb681c3f6f123d36b1c5b46cf27429bcf45f3f7"
+features = [
+    "serde",
+    "embed_ephem"
+]
+
+[dependencies.gnss-protos]
+version = "0.0.2"
+features = [
+    "gps"
+]
+
+[dependencies.rtcm-rs]
+version = "0.11"
+optional = true
+
 [dependencies]
 log = "0.4"
 thiserror = "2"
@@ -40,21 +67,11 @@ env_logger = "0.11.8"
 chrono = "0.4.29"
 nalgebra = "0.33"
 serialport = "4.7"
-gnss-rs = "2.4.0"
-rtcm-rs = { version = "0.11", optional = true }
+gnss-rs = "2.4"
 tokio = { version = "1.45.0", features = ["full"] }
 clap = { version = "4.5", features = ["derive", "color"] }
 hifitime = { version = "4.1", features = ["std"] }
 anise = { version = "0.6", features = ["embed_ephem"] }
 
-gnss-protos = { version = "0.0.2", features = ["gps"] }
-# gnss-protos = { path = "../gnss-protos", features = ["gps"] }
-
 ratatui = { version = "0.29", features = ["crossterm"] }
 # tui-logger = { version = "0.17", features = ["crossterm", "tracing-support"] }
-
-gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", rev = "1455e3a600ea27def1c9550359d27461cb7e8be5" }
-ublox = { git = "https://github.com/ublox-rs/ublox", rev = "2fa6761b2ccd4344326ad55f0dadc5965e06e957", features = ["std", "ubx_proto23", "sfrbx-gps"]  }
-
-# gpx = { version = "0.10", optional = true }
-# kml = { version = "0.8", optional = true }
