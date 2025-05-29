@@ -42,9 +42,10 @@ nalgebra = "0.33"
 serialport = "4.7"
 gnss-rs = "2.4.0"
 rtcm-rs = { version = "0.11", optional = true }
-hifitime = { version = "4.0", features = ["std"] }
 tokio = { version = "1.45.0", features = ["full"] }
 clap = { version = "4.5", features = ["derive", "color"] }
+hifitime = { version = "4.1", features = ["std"] }
+anise = { version = "0.6", features = ["embed_ephem"] }
 
 gnss-protos = { version = "0.0.2", features = ["gps"] }
 # gnss-protos = { path = "../gnss-protos", features = ["gps"] }
@@ -53,7 +54,6 @@ ratatui = { version = "0.29", features = ["crossterm"] }
 # tui-logger = { version = "0.17", features = ["crossterm", "tracing-support"] }
 
 gnss-rtk = { git = "https://github.com/rtk-rs/gnss-rtk", rev = "1455e3a600ea27def1c9550359d27461cb7e8be5" }
-anise = { git = "https://github.com/nyx-space/anise", branch = "dep/hifitime_4_1_0", features = ["embed_ephem"] }
 ublox = { git = "https://github.com/ublox-rs/ublox", rev = "2fa6761b2ccd4344326ad55f0dadc5965e06e957", features = ["std", "ubx_proto23", "sfrbx-gps"]  }
 
 # gpx = { version = "0.10", optional = true }
