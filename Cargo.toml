@@ -1,6 +1,6 @@
 [package]
 name = "rt-navi"
-version = "0.0.1"
+version = "0.1.0"
 license = "MPL-2.0"
 authors = ["Guillaume W. Bres <guillaume.bressaix@gmail.com>"]
 description = "High precision navigation in real time"
